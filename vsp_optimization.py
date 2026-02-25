@@ -180,12 +180,22 @@ def plot_parallel_coordinates():
     df = pd.read_csv("optimization_results.csv")
     fig = px.parallel_coordinates(
         df,
-        color="CL",
-        color_continuous_scale=px.colors.diverging.Tealrose,
-        dimensions=["Root_Chord", "Taper", "Dihedral", "Twist", "Span"],
-        title="Design Genetic Optimization: Geometry vs CL"
+        color="Lift",
+        color_continuous_scale='Plasma',
+        dimensions=["Root_Chord", "Taper Ratio", "Sweep", "Span"],
+        title="Design Genetic Optimization: Geometry vs Lift",
+        template="plotly_dark"
     )
     fig.show()
+    fig2= px.parallel_coordinates(
+        df,
+        color="Lift",
+        color_continuous_scale='Plasma',
+        dimensions=["Root_Chord", "Taper Ratio", "Sweep", "Span"],
+        title="Design Genetic Optimization: Geometry vs Lift",
+        template="plotly_dark"
+    )
+    fig2.show()
 
 if __name__ == "__main__":
     main()

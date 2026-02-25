@@ -179,8 +179,9 @@ def plot_parallel_coordinates():
         df_top,
         dimensions=["Root Chord", "Taper", "Sweep", "Twist", "Wingspan"],
         color="L_D",
-        color_continuous_scale=px.colors.diverging.Tealrose,
-        title=f"Design Space: Top 10% of L/D Results (L/D > {threshold:.2f})"
+        color_continuous_scale="Plasma",
+        title=f"Design Space: Top 5% of L/D Results (L/D > {threshold:.2f})",
+        template="plotly_dark"
     )
     fig.show()
     
