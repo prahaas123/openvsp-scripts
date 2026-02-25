@@ -178,24 +178,15 @@ def vsp_point(fname_vspaerotests, vin, alpha, Sref, bref, cref):
 
 def plot_parallel_coordinates():
     df = pd.read_csv("optimization_results.csv")
-    fig = px.parallel_coordinates(
-        df,
-        color="Lift",
-        color_continuous_scale='Plasma',
-        dimensions=["Root_Chord", "Taper Ratio", "Sweep", "Span"],
-        title="Design Genetic Optimization: Geometry vs Lift",
-        template="plotly_dark"
-    )
-    fig.show()
-    fig2= px.parallel_coordinates(
+    fig= px.parallel_coordinates(
         df,
         color="L_D",
         color_continuous_scale='Plasma',
-        dimensions=["Root_Chord", "Taper Ratio", "Sweep", "Span"],
+        dimensions=["Root_Chord", "Taper Ratio", "Sweep", "Span", "Lift"],
         title="Design Genetic Optimization: Geometry vs L/D",
         template="plotly_dark"
     )
-    fig2.show()
+    fig.show()
 
 if __name__ == "__main__":
     plot_parallel_coordinates()
