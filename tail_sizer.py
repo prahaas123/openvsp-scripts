@@ -18,9 +18,9 @@ tail_sizing_iterations = 10
 
 wing_params = {
     "span": 110,         # [cm]
-    "root_chord": 22.0,    # [cm]
+    "root_chord": 20.0,    # [cm]
     "taper": 0.7,        # [Ratio]
-    "sweep": 10.0,        # [deg] Leading Edge Sweep
+    "sweep": 0.0,        # [deg] Leading Edge Sweep
     "dihedral": 0.0,     # [deg]
     "twist": 0.0,        # [deg] Washout at tip
     "alpha": 3.0         # [deg]
@@ -35,7 +35,6 @@ htail_params = {
 
 vtail_params = {
     "V_V": 0.04,         # Vertical Tail Volume Coefficient (Typical: 0.03 - 0.06)
-    "l_V": 4.5,          # [m] Tail Moment Arm (Distance from CG to Tail AC)
     "airfoil": "0012",
     "aspect_ratio": 1.5
 }

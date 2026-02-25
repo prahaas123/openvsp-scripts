@@ -1,3 +1,4 @@
 # Ignore airfoils folder
 Airfoils/
 *.dat
+plane*
