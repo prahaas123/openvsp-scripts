@@ -56,7 +56,8 @@ def main():
                 "Wingspan": wing,
                 "CL": CL,
                 "CD": CD,
-                "L_D": LD
+                "L_D": LD,
+                "Lift": 2 * CL * 1.225 * velocity * velocity * r_c * wing / 10000
             })
             
         except Exception as e:
@@ -208,18 +209,33 @@ def plot_pareto_front():
         x=pareto_df['CL'], y=pareto_df['L_D'],
         mode='lines+markers',
         name='Pareto Front (Optimal)',
-        marker=dict(color='red', size=8),
+        marker=dict(color='yellow', size=8),
         line=dict(dash='dash')
     ))
     fig.update_layout(
         title="Pareto Front: CL vs L/D Optimization",
         xaxis_title="Lift Coefficient (CL)",
         yaxis_title="Lift-to-Drag Ratio (L/D)",
-        template="plotly_white"
+        template="plotly_dark"
     )
     fig.show()
     
+def plot_splom():
+    df = pd.read_csv("sweep_results.csv")
+    fig = px.scatter_matrix(
+        df,
+        dimensions=["Root Chord", "Taper", "Sweep", "Twist", "Wingspan"],
+        color="L_D",
+        color_continuous_scale="Viridis",
+        title="Pairwise Relationships in Design Space",
+        template="plotly_dark"
+    )
+    fig.update_traces(diagonal_visible=False) # Hides the diagonal plots
+    fig.update_layout(height=800, width=1000)
+    fig.show()
+    
 if __name__ == "__main__":
-    main()
+    # main()
     plot_parallel_coordinates()
     plot_pareto_front()
+    plot_splom()

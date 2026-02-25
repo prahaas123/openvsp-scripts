@@ -32,13 +32,13 @@ def main():
     final_objectives = -res.F 
     
     data = np.hstack([res.X, final_objectives])
-    columns = ["Root_Chord", "Taper", "Dihedral", "Twist", "Span", "CL", "L_D"] 
+    columns = ["Root_Chord", "Taper", "Dihedral", "Twist", "Span", "L_D", "Lift"] 
     df = pd.DataFrame(data, columns=columns)
     df.to_csv("optimization_results.csv", index=False)
     print("--- OPTIMIZATION COMPLETE. Saved to optimization_results.csv ---")
 
     for i in range(len(res.X)):
-        print(f"Design {i}: CL={final_objectives[i,0]:.4f}, L/D={final_objectives[i,1]:.4f}")
+        print(f"Design {i}: L/D={final_objectives[i,0]:.4f}, Lift={final_objectives[i,1]:.4f}")
         print(f"   Params: Root={res.X[i,0]:.2f}, Taper={res.X[i,1]:.2f}, Dihedral={res.X[i,2]:.2f}, Twist={res.X[i,3]:.2f}, Span={res.X[i,4]:.2f}")
         
     plot_parallel_coordinates()
@@ -67,8 +67,8 @@ class DeltaWingProblem(ElementwiseProblem):
         try:
             stl_path, analysis_path = generate_wing(run_id, span, root_chord, taper, 0.0, dihedral, twist, airfoil)
             CL, CD, LD = vsp_point(analysis_path, velocity, alpha, 0.5 * (root_chord + root_chord * taper) * span, span, root_chord)
-            norm_cl = CL / span
-            out["F"] = [-norm_cl, -LD]
+            lift = 2 * CL * 1.225 * velocity * velocity * root_chord * span / 10000
+            out["F"] = [-LD, -lift]
         except Exception as e:
             print(f"Run {run_id} failed: {e}")
             out["F"] = [1e10, 1e10] # Huge penalty
@@ -189,13 +189,13 @@ def plot_parallel_coordinates():
     fig.show()
     fig2= px.parallel_coordinates(
         df,
-        color="Lift",
+        color="L_D",
         color_continuous_scale='Plasma',
         dimensions=["Root_Chord", "Taper Ratio", "Sweep", "Span"],
-        title="Design Genetic Optimization: Geometry vs Lift",
+        title="Design Genetic Optimization: Geometry vs L/D",
         template="plotly_dark"
     )
     fig2.show()
 
 if __name__ == "__main__":
-    main()
+    plot_parallel_coordinates()
