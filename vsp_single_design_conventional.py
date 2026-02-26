@@ -41,7 +41,7 @@ vtail_params = {
 
 def main():
     # Aero sweep
-    # stl_path, analysis_path = generate_wing_and_htail("plane", wing_params, airfoil_file, htail_params)
+    # stl_path, analysis_path = generate_wing_and_tail("plane", wing_params, airfoil_file, htail_params)
     # visualize_stl(stl_path)
 
     # CL, CD, Cm = vsp_sweep(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
@@ -61,11 +61,13 @@ def main():
     #     writer.writerows(aero_results)    # Write all data rows
 
     # Stability Sweep
-    stl_path, analysis_path = generate_wing_and_htail("plane", wing_params, airfoil_file, htail_params)
+    stl_path, analysis_path = generate_wing_and_tail("plane", wing_params, airfoil_file, htail_params)
     visualize_stl(stl_path)
-    # vsp_stability(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
+    vsp_stability(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
     
     # os.rename('plane.stab', 'STABILITY.txt')
+    # read_stability()
+    # os.remove("STABILITY.text")
 
     # for filename in glob.glob(f"plane*"):
     #     try:
@@ -73,7 +75,7 @@ def main():
     #     except OSError:
     #         pass
 
-def generate_wing_and_htail(wing_name, wing_params, airfoil_file, htail_params):
+def generate_wing_and_tail(wing_name, wing_params, airfoil_file, htail_params):
     vsp.VSPCheckSetup()
     vsp.ClearVSPModel()
     
@@ -131,7 +133,8 @@ def generate_wing_and_htail(wing_name, wing_params, airfoil_file, htail_params):
     # Vertical tail
     vtail_id = vsp.AddGeom("WING")
     vsp.SetGeomName(vtail_id, "Vertical_Tail")
-    vsp.SetParmVal(vtail_id, "TotalSpan", "WingGeom", vtail_params["span"] * 2)
+    vsp.SetParmVal(vtail_id, "Sym_Planar_Flag", "Sym", 0.0)
+    vsp.SetParmVal(vtail_id, "TotalSpan", "WingGeom", vtail_params["span"])
     vsp.SetParmVal(vtail_id, "Root_Chord", "XSec_1", vtail_params["chord"])
     vsp.SetParmVal(vtail_id, "Tip_Chord", "XSec_1", vtail_params["chord"] * vtail_params["taper"])
     vsp.SetParmVal(vtail_id, "SectTess_U", "XSec_1", wing_span_res)
@@ -155,6 +158,31 @@ def generate_wing_and_htail(wing_name, wing_params, airfoil_file, htail_params):
         vsp.SetParmVal(htail_id, "ThickChord", f"XSecCurve_{i}", thick)
         
     vsp.SetSetFlag(vtail_id, 3, True)
+    
+    # Control surfaces
+    # Ailerons
+    cs_a_id = vsp.AddSubSurf(wing_id, vsp.SS_CONTROL)
+    vsp.SetParmVal(wing_id, "SE_Const_Flag", "SS_Control_1", 1.0)
+    vsp.SetParmVal(wing_id, "Length_C_Start", "SS_Control_1", 0.2)
+    vsp.SetParmVal(wing_id, "EtaFlag", "SS_Control_1", 1.0)
+    vsp.SetParmVal(wing_id, "EtaStart", "SS_Control_1", 0.2)
+    vsp.SetParmVal(wing_id, "EtaEnd", "SS_Control_1", 0.8)
+    
+    # Elevator
+    cs_e_id = vsp.AddSubSurf(htail_id, vsp.SS_CONTROL)
+    vsp.SetParmVal(htail_id, "SE_Const_Flag", "SS_Control_1", 1.0)
+    vsp.SetParmVal(htail_id, "Length_C_Start", "SS_Control_1", 0.25)
+    vsp.SetParmVal(htail_id, "EtaFlag", "SS_Control_1", 1.0)
+    vsp.SetParmVal(htail_id, "EtaStart", "SS_Control_1", 0.0)
+    vsp.SetParmVal(htail_id, "EtaEnd", "SS_Control_1", 0.8)
+    
+    # Rudder
+    cs_r_id = vsp.AddSubSurf(vtail_id, vsp.SS_CONTROL)
+    vsp.SetParmVal(vtail_id, "SE_Const_Flag", "SS_Control_1", 1.0)
+    vsp.SetParmVal(vtail_id, "Length_C_Start", "SS_Control_1", 0.35)
+    vsp.SetParmVal(vtail_id, "EtaFlag", "SS_Control_1", 1.0)
+    vsp.SetParmVal(vtail_id, "EtaStart", "SS_Control_1", 0.2)
+    vsp.SetParmVal(vtail_id, "EtaEnd", "SS_Control_1", 0.8)
 
     vsp.Update()
     
@@ -258,13 +286,36 @@ def vsp_stability(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [15]) 
     vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [vin * 100.0])
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
+    
+    # Control Surfaces
+    cs_pitch_id = vsp.CreateVSPAEROControlSurfaceGroup() # Pitch
+    cs_roll_id = vsp.CreateVSPAEROControlSurfaceGroup() # Roll
+    cs_yaw_id = vsp.CreateVSPAEROControlSurfaceGroup() # Yaw
+    vsp.SetVSPAEROControlGroupName("Pitch", cs_pitch_id)
+    vsp.SetVSPAEROControlGroupName("Roll", cs_roll_id)
+    vsp.SetVSPAEROControlGroupName("Yaw", cs_yaw_id)
+    print(vsp.GetAvailableCSNameVec(cs_roll_id))
+    vsp.AddSelectedToCSGroup([8, 9], cs_pitch_id)
+    vsp.AddSelectedToCSGroup([6, 7], cs_roll_id)
+    vsp.AddSelectedToCSGroup([10], cs_yaw_id)
+    vsp.Update()
+    
+    group_pitch_str = f"ControlSurfaceGroup_{cs_pitch_id + 1}"
+    group_roll_str  = f"ControlSurfaceGroup_{cs_roll_id + 1}"
+    group_yaw_str  = f"ControlSurfaceGroup_{cs_yaw_id + 1}"
+
+    container_id = vsp.FindContainer("VSPAEROSettings", 0)
+    elev_id = vsp.FindGeoms()[1]
+    cs_id = vsp.GetSubSurf(elev_id, 0)
+        
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", group_pitch_str), -1) # Since elevators are symmetrical
 
     vsp.SetIntAnalysisInput(aero_analysis, "UnsteadyType", [1])
     
     vsp.SetDoubleAnalysisInput(aero_analysis, "Rho", [1.225e-6])
 
     print(f"--- Running Stability Sweep ({aero_analysis}) ---")
-    vsp.ExecAnalysis(aero_analysis)
+    # vsp.ExecAnalysis(aero_analysis)
 
 def read_stability(input_file="STABILITY.txt", output_file="vsp_derivatives.csv"):
     target_aoa = "0.0000000" 
