@@ -34,15 +34,17 @@ htail_params = {
 vtail_params = {
     "chord": 14.2,
     "airfoil": "0012",   
-    "span": 18.0
+    "span": 18.0,
+    "taper": 0.75,
+    "sweep": 20.0
 }
 
 def main():
     # Aero sweep
-    # stl_path, analysis_path = generate_wing("wing", span, root_chord, taper_ratio, sweep, dihedral, twist, airfoil_file)
+    # stl_path, analysis_path = generate_wing_and_htail("plane", wing_params, airfoil_file, htail_params)
     # visualize_stl(stl_path)
 
-    # CL, CD, Cm = vsp_sweep(analysis_path, velocity, alphas, 0.5 * (root_chord + root_chord * taper_ratio) * span, span, root_chord)
+    # CL, CD, Cm = vsp_sweep(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
     # aero_results = zip(alphas, CL, CD, Cm)
 
     # for filename in glob.glob(f"wing*"):
@@ -61,15 +63,15 @@ def main():
     # Stability Sweep
     stl_path, analysis_path = generate_wing_and_htail("plane", wing_params, airfoil_file, htail_params)
     visualize_stl(stl_path)
-    vsp_stability(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
+    # vsp_stability(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
     
-    os.rename('plane.stab', 'STABILITY.txt')
+    # os.rename('plane.stab', 'STABILITY.txt')
 
-    for filename in glob.glob(f"plane*"):
-        try:
-            os.remove(filename)
-        except OSError:
-            pass
+    # for filename in glob.glob(f"plane*"):
+    #     try:
+    #         os.remove(filename)
+    #     except OSError:
+    #         pass
 
 def generate_wing_and_htail(wing_name, wing_params, airfoil_file, htail_params):
     vsp.VSPCheckSetup()
@@ -125,6 +127,34 @@ def generate_wing_and_htail(wing_name, wing_params, airfoil_file, htail_params):
         vsp.SetParmVal(htail_id, "ThickChord", f"XSecCurve_{i}", thick)
 
     vsp.SetSetFlag(htail_id, 2, True)
+    
+    # Vertical tail
+    vtail_id = vsp.AddGeom("WING")
+    vsp.SetGeomName(vtail_id, "Vertical_Tail")
+    vsp.SetParmVal(vtail_id, "TotalSpan", "WingGeom", vtail_params["span"] * 2)
+    vsp.SetParmVal(vtail_id, "Root_Chord", "XSec_1", vtail_params["chord"])
+    vsp.SetParmVal(vtail_id, "Tip_Chord", "XSec_1", vtail_params["chord"] * vtail_params["taper"])
+    vsp.SetParmVal(vtail_id, "SectTess_U", "XSec_1", wing_span_res)
+    vsp.SetParmVal(vtail_id, "Tess_W", "Shape", wing_chord_res)
+    vsp.SetParmVal(vtail_id, "Sweep", "XSec_1", vtail_params["sweep"])
+    vsp.SetParmVal(vtail_id, "Dihedral", "XSec_1", 0.0)
+    vsp.SetParmVal(vtail_id, "Twist", "XSec_1", 0.0)
+    vsp.SetParmVal(vtail_id, "X_Rel_Location", "XForm", htail_params["l_H"])
+    vsp.SetParmVal(vtail_id, "X_Rel_Rotation", "XForm", 90.0)
+
+    naca_code = vtail_params["airfoil"]
+    camber = int(naca_code[0]) / 100.0
+    cam_loc = int(naca_code[1]) / 10.0
+    thick = int(naca_code[2:]) / 100.0
+    for i in [0, 1]:
+        surf = vsp.GetXSecSurf(vtail_id, i)
+        # vsp.ChangeXSecShape(surf, i, vsp.XS_NACA_4_SERIES)
+        xsec = vsp.GetXSec(surf, i)
+        vsp.SetParmVal(htail_id, "Camber", f"XSecCurve_{i}", camber)
+        vsp.SetParmVal(htail_id, "CamberLoc", f"XSecCurve_{i}", cam_loc)
+        vsp.SetParmVal(htail_id, "ThickChord", f"XSecCurve_{i}", thick)
+        
+    vsp.SetSetFlag(vtail_id, 3, True)
 
     vsp.Update()
     
