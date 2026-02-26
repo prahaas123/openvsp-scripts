@@ -62,7 +62,7 @@ def main():
     # Stability Sweep
     stl_path, analysis_path = generate_wing_and_htail("plane", wing_params, airfoil_file, htail_params)
     visualize_stl(stl_path)
-    vsp_stability(analysis_path, velocity, [0.0], 0.5 * (wing_params["root_chord"] + wing_params["root_chord"] * wing_params["taper"]) * wing_params["span"], wing_params["span"], wing_params["root_chord"])
+    vsp_stability(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
     
     os.rename('plane.stab', 'STABILITY.txt')
 
