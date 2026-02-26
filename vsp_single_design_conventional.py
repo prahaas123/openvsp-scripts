@@ -97,7 +97,7 @@ def generate_wing_and_htail(wing_name, wing_params, airfoil_file, htail_params):
         vsp.ReadFileAirfoil(xsec, airfoil_file)
         
     vsp.SetSetFlag(wing_id, 1, True)
-
+    
     # Horizontal tail
     htail_id = vsp.AddGeom("WING")
     vsp.SetGeomName(htail_id, "Horizontal_Tail")
@@ -124,7 +124,7 @@ def generate_wing_and_htail(wing_name, wing_params, airfoil_file, htail_params):
         vsp.SetParmVal(htail_id, "CamberLoc", f"XSecCurve_{i}", cam_loc)
         vsp.SetParmVal(htail_id, "ThickChord", f"XSecCurve_{i}", thick)
 
-    vsp.SetSetFlag(htail_id, 1, True) # Add to Set 1
+    vsp.SetSetFlag(htail_id, 2, True)
 
     vsp.Update()
     
