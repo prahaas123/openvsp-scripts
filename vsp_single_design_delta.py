@@ -1,7 +1,6 @@
 import os
 import openvsp as vsp
 import pyvista as pv
-import os
 import csv
 import glob
 

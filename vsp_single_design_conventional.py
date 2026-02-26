@@ -1,7 +1,6 @@
 import os
 import openvsp as vsp
 import pyvista as pv
-import os
 import csv
 import glob
 
@@ -231,6 +230,8 @@ def vsp_stability(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
 
     vsp.SetIntAnalysisInput(aero_analysis, "UnsteadyType", [1])
+    
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Rho", [1.225e-6])
 
     print(f"--- Running Stability Sweep ({aero_analysis}) ---")
     vsp.ExecAnalysis(aero_analysis)
