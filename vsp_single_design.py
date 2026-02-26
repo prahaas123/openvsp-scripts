@@ -182,16 +182,27 @@ def vsp_stability(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     vsp.SetVSPAEROControlGroupName("Pitch", cs_pitch_id)
     cs_roll_id = vsp.CreateVSPAEROControlSurfaceGroup() # Roll
     vsp.SetVSPAEROControlGroupName("Roll", cs_roll_id)
-    vsp.AddAllToVSPAEROControlSurfaceGroup(cs_pitch_id)
-    vsp.AddAllToVSPAEROControlSurfaceGroup(cs_roll_id)
+    print(vsp.GetAvailableCSNameVec(cs_roll_id))
+    print(vsp.GetAvailableCSNameVec(cs_pitch_id))
+    vsp.AddSelectedToCSGroup([3, 4], cs_pitch_id)
+    print(vsp.GetAvailableCSNameVec(cs_roll_id))
+    print(vsp.GetAvailableCSNameVec(cs_pitch_id))
+    vsp.AddSelectedToCSGroup([1, 2], cs_roll_id)
+    print(vsp.GetAvailableCSNameVec(cs_roll_id))
+    print(vsp.GetAvailableCSNameVec(cs_pitch_id))
+    vsp.Update()
+    
+    group_pitch_str = f"ControlSurfaceGroup_{cs_pitch_id + 1}"
+    group_roll_str  = f"ControlSurfaceGroup_{cs_roll_id + 1}"
 
     container_id = vsp.FindContainer("VSPAEROSettings", 0)
     wing_id = vsp.FindGeoms()[0]
-    cs_id = vsp.GetSubSurf(wing_id, 0)        
-    vsp.SetParmVal(container_id, f"Surf_{cs_id}_0_Gain", "ControlSurfaceGroup_0", 1.0)
-    vsp.SetParmVal(container_id, f"Surf_{cs_id}_1_Gain", "ControlSurfaceGroup_0", -1.0)
-    vsp.SetParmVal(container_id, f"Surf_{cs_id}_0_Gain", "ControlSurfaceGroup_1", 1.0)
-    vsp.SetParmVal(container_id, f"Surf_{cs_id}_1_Gain", "ControlSurfaceGroup_1", 1.0)
+    cs_id = vsp.GetSubSurf(wing_id, 0)
+        
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_0_Gain", group_pitch_str), 1)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", group_pitch_str), -1)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_0_Gain", group_roll_str), 1)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", group_roll_str), 1)
     
     print(f"--- Running Meshing ({geom_analysis}) ---")
     vsp.ExecAnalysis(geom_analysis)
@@ -246,7 +257,7 @@ def read_stability(input_file="STABILITY.txt", output_file="vsp_derivatives.csv"
                 coef = parts[0]
                 
                 if coef == "CL": # Lift 
-                    vsp_dict["CL_de"]   = float(parts[9])  # Extra lift from elevator
+                    vsp_dict["CL_de"]   = float(parts[10])  # Extra lift from elevator
                 elif coef == "CS":  # Side Force (Y)
                     vsp_dict["CY_beta"] = float(parts[3])
                     vsp_dict["CY_p"]    = float(parts[4])
@@ -255,15 +266,15 @@ def read_stability(input_file="STABILITY.txt", output_file="vsp_derivatives.csv"
                     vsp_dict["Cl_beta"] = float(parts[3])
                     vsp_dict["Cl_p"]    = float(parts[4])
                     vsp_dict["Cl_r"]    = float(parts[6])
-                    vsp_dict["Cl_da"]   = float(parts[10]) # Roll from Aileron
+                    vsp_dict["Cl_da"]   = float(parts[9]) # Roll from Aileron
                 elif coef == "CMm": # Pitch Moment (m)
                     vsp_dict["Cm_q"]    = float(parts[5])
-                    vsp_dict["Cm_de"]   = float(parts[9])  # Pitch from Elevator
+                    vsp_dict["Cm_de"]   = float(parts[10])  # Pitch from Elevator
                 elif coef == "CMn": # Yaw Moment (n)
                     vsp_dict["Cn_beta"] = float(parts[3])
                     vsp_dict["Cn_p"]    = float(parts[4])
                     vsp_dict["Cn_r"]    = float(parts[6])
-                    vsp_dict["Cn_da"]   = float(parts[10]) # Adverse Yaw from Aileron
+                    vsp_dict["Cn_da"]   = float(parts[9]) # Adverse Yaw from Aileron
                 
                 elif "Result" in line or line.startswith("****"):
                     capture_derivatives = False
