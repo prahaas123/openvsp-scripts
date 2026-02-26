@@ -179,7 +179,7 @@ def vsp_sweep(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     vsp.SetDoubleAnalysisInput(aero_analysis, "MachStart", [mach])
     vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
     vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [15]) 
-    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [100.0])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [vin * 100.0])
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
 
     print(f"--- Running Aero Sweep ({aero_analysis}) ---")
@@ -226,7 +226,7 @@ def vsp_stability(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     vsp.SetDoubleAnalysisInput(aero_analysis, "MachStart", [mach])
     vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
     vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [15]) 
-    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [100.0])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [vin * 100.0])
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
 
     vsp.SetIntAnalysisInput(aero_analysis, "UnsteadyType", [1])
