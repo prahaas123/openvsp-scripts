@@ -17,7 +17,7 @@ x_cg = 6.0
 wing_params = {
     "span": 100,         # [cm]
     "root_chord": 23.1,  # [cm]
-    "taper": 0.0,        # [Ratio]
+    "taper": 1.0,        # [Ratio]
     "sweep": 0.0,        # [deg] Leading Edge Sweep
     "dihedral": 0.0,     # [deg]
     "twist": 0.0,        # [deg] Washout at tip
@@ -26,7 +26,7 @@ wing_params = {
 
 htail_params = {
     "chord": 14.2,
-    "l_H": 90.0,            # [cm] Tail Moment Arm (Distance from CG to Tail AC)
+    "l_H": 37.9,            # [cm] Tail Moment Arm (Distance from CG to Tail AC)
     "airfoil": "0012",   
     "span": 25.0,
     "alpha": 0.0 
@@ -60,12 +60,13 @@ def main():
     #     writer.writerows(aero_results)    # Write all data rows
 
     # Stability Sweep
-    stl_path, analysis_path = generate_wing_and_htail("wing", wing_params, airfoil_file, htail_params)
-    vsp_stability(analysis_path, velocity, [0.0], 0.5 * (wing_params["root_chord"] + wing_params["root_chord"] * wing_params["taper_ratio"]) * wing_params["span"], wing_params["span"], wing_params["root_chord"])
+    stl_path, analysis_path = generate_wing_and_htail("plane", wing_params, airfoil_file, htail_params)
+    visualize_stl(stl_path)
+    vsp_stability(analysis_path, velocity, [0.0], 0.5 * (wing_params["root_chord"] + wing_params["root_chord"] * wing_params["taper"]) * wing_params["span"], wing_params["span"], wing_params["root_chord"])
+    
+    os.rename('plane.stab', 'STABILITY.txt')
 
-    os.rename('wing.stab', 'STABILITY.txt')
-
-    for filename in glob.glob(f"wing*"):
+    for filename in glob.glob(f"plane*"):
         try:
             os.remove(filename)
         except OSError:
@@ -206,6 +207,7 @@ def vsp_stability(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     # Control surfaces
     # ADD STUFF
     
+    vsp.Update()
     print(f"--- Running Meshing ({geom_analysis}) ---")
     vsp.ExecAnalysis(geom_analysis)
 
