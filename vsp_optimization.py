@@ -49,8 +49,8 @@ class DeltaWingProblem(ElementwiseProblem):
             n_var=5,             # Number of variables 
             n_obj=2,             # Number of objectives 
             n_constr=0,          # Constraints 
-            xl=np.array([50, 0.05, -10.0, -15.0, 50]), # Lower bounds for variables
-            xu=np.array([200, 1.0, 10.0, 15.0, 200])  # Upper bounds for variables
+            xl=np.array([0.5, 0.05, -10.0, -15.0, 0.5]), # Lower bounds for variables
+            xu=np.array([2.0, 1.0, 10.0, 15.0, 2.0])  # Upper bounds for variables
         )
 
     def _evaluate(self, x, out, *args, **kwargs):

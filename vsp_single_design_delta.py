@@ -11,13 +11,13 @@ alphas = list(range(-15, 21)) # degrees AoA
 
 airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
 
-root_chord = 91.0
+root_chord = 0.91
 taper_ratio = 0.1
 sweep = 55.0
 dihedral = 5.0
 twist = -15.0
-span = 121.0
-x_cg = 45.0
+span = 1.21
+x_cg = 0.45
 elevon_length = 0.1         # % of chord
 elevon_start = 0.2          # % of wingspan
 elevon_end = 0.8            # % of wingspan

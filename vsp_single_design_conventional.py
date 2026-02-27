@@ -11,11 +11,11 @@ alphas = list(range(-15, 21)) # degrees AoA
 
 airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\s1223.dat"
 
-x_cg = 6.0
+x_cg = 0.06
 
 wing_params = {
-    "span": 100,         # [cm]
-    "root_chord": 23.1,  # [cm]
+    "span": 1.0,         # [m]
+    "root_chord": 0.231, # [m]
     "taper": 1.0,        # [Ratio]
     "sweep": 0.0,        # [deg] Leading Edge Sweep
     "dihedral": 0.0,     # [deg]
@@ -24,17 +24,17 @@ wing_params = {
 }
 
 htail_params = {
-    "chord": 14.2,
-    "l_H": 37.9,            # [cm] Tail Moment Arm (Distance from CG to Tail AC)
+    "chord": 0.142,
+    "l_H": 0.379,            # [mm] Tail Moment Arm (Distance from CG to Tail AC)
     "airfoil": "0012",   
-    "span": 25.0,
+    "span": 0.25,
     "alpha": 0.0 
 }
 
 vtail_params = {
-    "chord": 14.2,
+    "chord": 0.142,
     "airfoil": "0012",   
-    "span": 18.0,
+    "span": 0.18,
     "taper": 0.75,
     "sweep": 20.0
 }
@@ -65,7 +65,7 @@ def main():
     visualize_stl(stl_path)
     vsp_stability(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
     
-    # os.rename('plane.stab', 'STABILITY.txt')
+    os.rename('plane.stab', 'STABILITY.txt')
     # read_stability()
     # os.remove("STABILITY.text")
 
@@ -237,7 +237,7 @@ def vsp_sweep(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     vsp.SetDoubleAnalysisInput(aero_analysis, "MachStart", [mach])
     vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
     vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [15]) 
-    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [vin * 100.0])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [vin])
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
 
     print(f"--- Running Aero Sweep ({aero_analysis}) ---")
@@ -262,7 +262,27 @@ def vsp_stability(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     vsp.SetIntAnalysisInput(geom_analysis, "ThinGeomSet", [vsp.SET_SHOWN])
     
     # Control surfaces
-    # ADD STUFF
+    cs_pitch_id = vsp.CreateVSPAEROControlSurfaceGroup() # Pitch
+    cs_roll_id = vsp.CreateVSPAEROControlSurfaceGroup() # Roll
+    cs_yaw_id = vsp.CreateVSPAEROControlSurfaceGroup() # Yaw
+    vsp.SetVSPAEROControlGroupName("Pitch", cs_pitch_id)
+    vsp.SetVSPAEROControlGroupName("Roll", cs_roll_id)
+    vsp.SetVSPAEROControlGroupName("Yaw", cs_yaw_id)
+    print(vsp.GetAvailableCSNameVec(cs_roll_id))
+    vsp.AddSelectedToCSGroup([6, 7], cs_pitch_id)
+    vsp.AddSelectedToCSGroup([8, 9], cs_roll_id)
+    vsp.AddSelectedToCSGroup([10], cs_yaw_id)
+    
+    vsp.Update()
+    
+    group_pitch_str = f"ControlSurfaceGroup_{cs_pitch_id + 1}"
+    group_roll_str  = f"ControlSurfaceGroup_{cs_roll_id + 1}"
+    group_yaw_str  = f"ControlSurfaceGroup_{cs_yaw_id + 1}"
+
+    container_id = vsp.FindContainer("VSPAEROSettings", 0)
+    elev_id = vsp.FindGeoms()[1]
+    cs_id = vsp.GetSubSurf(elev_id, 0)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", group_pitch_str), -1) # Since elevators are symmetrical
     
     vsp.Update()
     print(f"--- Running Meshing ({geom_analysis}) ---")
@@ -284,38 +304,15 @@ def vsp_stability(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     vsp.SetDoubleAnalysisInput(aero_analysis, "MachStart", [mach])
     vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
     vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [15]) 
-    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [vin * 100.0])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [vin])
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
-    
-    # Control Surfaces
-    cs_pitch_id = vsp.CreateVSPAEROControlSurfaceGroup() # Pitch
-    cs_roll_id = vsp.CreateVSPAEROControlSurfaceGroup() # Roll
-    cs_yaw_id = vsp.CreateVSPAEROControlSurfaceGroup() # Yaw
-    vsp.SetVSPAEROControlGroupName("Pitch", cs_pitch_id)
-    vsp.SetVSPAEROControlGroupName("Roll", cs_roll_id)
-    vsp.SetVSPAEROControlGroupName("Yaw", cs_yaw_id)
-    print(vsp.GetAvailableCSNameVec(cs_roll_id))
-    vsp.AddSelectedToCSGroup([8, 9], cs_pitch_id)
-    vsp.AddSelectedToCSGroup([6, 7], cs_roll_id)
-    vsp.AddSelectedToCSGroup([10], cs_yaw_id)
-    vsp.Update()
-    
-    group_pitch_str = f"ControlSurfaceGroup_{cs_pitch_id + 1}"
-    group_roll_str  = f"ControlSurfaceGroup_{cs_roll_id + 1}"
-    group_yaw_str  = f"ControlSurfaceGroup_{cs_yaw_id + 1}"
-
-    container_id = vsp.FindContainer("VSPAEROSettings", 0)
-    elev_id = vsp.FindGeoms()[1]
-    cs_id = vsp.GetSubSurf(elev_id, 0)
-        
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", group_pitch_str), -1) # Since elevators are symmetrical
 
     vsp.SetIntAnalysisInput(aero_analysis, "UnsteadyType", [1])
     
-    vsp.SetDoubleAnalysisInput(aero_analysis, "Rho", [1.225e-6])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Rho", [1.225])
 
     print(f"--- Running Stability Sweep ({aero_analysis}) ---")
-    # vsp.ExecAnalysis(aero_analysis)
+    vsp.ExecAnalysis(aero_analysis)
 
 def read_stability(input_file="STABILITY.txt", output_file="vsp_derivatives.csv"):
     target_aoa = "0.0000000" 

@@ -20,11 +20,11 @@ alpha = 5 # degrees AoA
 airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
 
 ranges = {
-    "root_chord": np.linspace(50, 200, 4),      # meters
+    "root_chord": np.linspace(0.5, 2.0, 4),     # meters
     "taper":      np.linspace(0.1, 0.4, 4),     # ratio
     "sweep":      np.linspace(40.0, 70.0, 4),   # degrees
     "twist":      np.linspace(-10.0, 0.0, 3),   # degrees
-    "span":       np.linspace(50, 200, 3)       # meters
+    "span":       np.linspace(0.5, 2.0, 3)      # meters
 }
 
 def main():
@@ -57,7 +57,7 @@ def main():
                 "CL": CL,
                 "CD": CD,
                 "L_D": LD,
-                "Lift": 2 * CL * 1.225 * velocity * velocity * r_c * wing / 10000
+                "Lift": 2 * CL * 1.225 * velocity * velocity * r_c * wing
             })
             
         except Exception as e:

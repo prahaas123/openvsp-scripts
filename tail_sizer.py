@@ -17,8 +17,8 @@ moment_tolerance = 0.05
 tail_sizing_iterations = 10
 
 wing_params = {
-    "span": 110,         # [cm]
-    "root_chord": 20.0,    # [cm]
+    "span": 1.1,         # [m]
+    "root_chord": 0.20,  # [m]
     "taper": 0.7,        # [Ratio]
     "sweep": 0.0,        # [deg] Leading Edge Sweep
     "dihedral": 0.0,     # [deg]
@@ -28,7 +28,7 @@ wing_params = {
 
 htail_params = {
     "V_H": 0.3,          # Horizontal Tail Volume Coefficient (Typical: 0.4 - 0.6)
-    "l_H": 90.0,         # [cm] Tail Moment Arm (Distance from CG to Tail AC)
+    "l_H": 0.90,         # [cm] Tail Moment Arm (Distance from CG to Tail AC)
     "airfoil": "0012",   
     "aspect_ratio": 3.5  
 }
