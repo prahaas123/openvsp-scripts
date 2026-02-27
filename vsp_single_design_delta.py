@@ -45,10 +45,10 @@ def main():
 
     # Stability Sweep
     stl_path, analysis_path = generate_wing("wing", span, root_chord, taper_ratio, sweep, dihedral, twist, airfoil_file, elevon_length, elevon_start, elevon_end)
-    vsp_stability(analysis_path, velocity, [0.0], 0.5 * (root_chord + root_chord * taper_ratio) * span, span, root_chord)
+    stab_results = vsp_stability(analysis_path, velocity, [0.0], 0.5 * (root_chord + root_chord * taper_ratio) * span, span, root_chord)
 
     os.rename('wing.stab', 'STABILITY.txt')
-    read_stability()
+    read_stability(stab_results)
     os.remove("STABILITY.txt")
 
     for filename in glob.glob(f"wing*"):
@@ -132,7 +132,7 @@ def vsp_sweep(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     vsp.SetAnalysisInputDefaults(geom_analysis)
     
     vsp.SetIntAnalysisInput(geom_analysis, "GeomSet", [vsp.SET_NONE])      
-    vsp.SetIntAnalysisInput(geom_analysis, "ThinGeomSet", [vsp.SET_SHOWN])
+    vsp.SetIntAnalysisInput(geom_analysis, "ThinGeomSet", [vsp.SET_ALL])
     
     print(f"--- Running Meshing ({geom_analysis}) ---")
     vsp.ExecAnalysis(geom_analysis)
@@ -153,7 +153,7 @@ def vsp_sweep(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     vsp.SetDoubleAnalysisInput(aero_analysis, "MachStart", [mach])
     vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
     vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [15]) 
-    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [100.0])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [vin])
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
     vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
 
@@ -181,29 +181,17 @@ def vsp_stability(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     # Control surfaces
     cs_pitch_id = vsp.CreateVSPAEROControlSurfaceGroup() # Pitch
     vsp.SetVSPAEROControlGroupName("Pitch", cs_pitch_id)
+    vsp.AddAllToVSPAEROControlSurfaceGroup(cs_pitch_id)
     cs_roll_id = vsp.CreateVSPAEROControlSurfaceGroup() # Roll
     vsp.SetVSPAEROControlGroupName("Roll", cs_roll_id)
-    print(vsp.GetAvailableCSNameVec(cs_roll_id))
-    print(vsp.GetAvailableCSNameVec(cs_pitch_id))
-    vsp.AddSelectedToCSGroup([3, 4], cs_pitch_id)
-    print(vsp.GetAvailableCSNameVec(cs_roll_id))
-    print(vsp.GetAvailableCSNameVec(cs_pitch_id))
-    vsp.AddSelectedToCSGroup([1, 2], cs_roll_id)
-    print(vsp.GetAvailableCSNameVec(cs_roll_id))
-    print(vsp.GetAvailableCSNameVec(cs_pitch_id))
+    vsp.AddAllToVSPAEROControlSurfaceGroup(cs_roll_id)
     vsp.Update()
     
     group_pitch_str = f"ControlSurfaceGroup_{cs_pitch_id + 1}"
-    group_roll_str  = f"ControlSurfaceGroup_{cs_roll_id + 1}"
-
     container_id = vsp.FindContainer("VSPAEROSettings", 0)
     wing_id = vsp.FindGeoms()[0]
     cs_id = vsp.GetSubSurf(wing_id, 0)
-        
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_0_Gain", group_pitch_str), 1)
     vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", group_pitch_str), -1)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_0_Gain", group_roll_str), 1)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", group_roll_str), 1)
     
     print(f"--- Running Meshing ({geom_analysis}) ---")
     vsp.ExecAnalysis(geom_analysis)
@@ -232,54 +220,36 @@ def vsp_stability(fname_vspaerotests, vin, alphas, Sref, bref, cref):
 
     print(f"--- Running Stability Sweep ({aero_analysis}) ---")
     vsp.ExecAnalysis(aero_analysis)
+    
+    stab_results = vsp.FindLatestResultsID("VSPAERO_Stab")
+    return stab_results
 
-def read_stability(input_file="STABILITY.txt", output_file="vsp_derivatives.csv"):
-    target_aoa = "0.0000000" 
-    current_aoa = None
-    capture_derivatives = False
+def read_stability(stab_res, output_file="vsp_derivatives.csv"):
     vsp_dict = {}
-
-    with open(input_file, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line: continue
-
-            if line.startswith("AoA_"):
-                current_aoa = line.split()[1]
-                continue
-
-            if "Coef" in line and "Total" in line:
-                capture_derivatives = True
-                continue
-
-            if capture_derivatives and current_aoa == target_aoa:
-                parts = line.split()
-                if not parts: continue
                 
-                coef = parts[0]
-                
-                if coef == "CL": # Lift 
-                    vsp_dict["CL_de"]   = float(parts[10])  # Extra lift from elevator
-                elif coef == "CS":  # Side Force (Y)
-                    vsp_dict["CY_beta"] = float(parts[3])
-                    vsp_dict["CY_p"]    = float(parts[4])
-                    vsp_dict["CY_r"]    = float(parts[6])
-                elif coef == "CMl": # Roll Moment (l)
-                    vsp_dict["Cl_beta"] = float(parts[3])
-                    vsp_dict["Cl_p"]    = float(parts[4])
-                    vsp_dict["Cl_r"]    = float(parts[6])
-                    vsp_dict["Cl_da"]   = float(parts[9]) # Roll from Aileron
-                elif coef == "CMm": # Pitch Moment (m)
-                    vsp_dict["Cm_q"]    = float(parts[5])
-                    vsp_dict["Cm_de"]   = float(parts[10])  # Pitch from Elevator
-                elif coef == "CMn": # Yaw Moment (n)
-                    vsp_dict["Cn_beta"] = float(parts[3])
-                    vsp_dict["Cn_p"]    = float(parts[4])
-                    vsp_dict["Cn_r"]    = float(parts[6])
-                    vsp_dict["Cn_da"]   = float(parts[9]) # Adverse Yaw from Aileron
-                
-                elif "Result" in line or line.startswith("****"):
-                    capture_derivatives = False
+    # Lift
+    vsp_dict["CL_de"]   = vsp.GetDoubleResults(stab_res, "Pitch_CL")[0]
+
+    # Side Force (Y) - OpenVSP uses "CS"
+    vsp_dict["CY_beta"] = vsp.GetDoubleResults(stab_res, "CS_Beta")[0]
+    vsp_dict["CY_p"]    = vsp.GetDoubleResults(stab_res, "CS_p")[0]
+    vsp_dict["CY_r"]    = vsp.GetDoubleResults(stab_res, "CS_r")[0]
+
+    # Roll Moment (l) - OpenVSP uses "CMl"
+    vsp_dict["Cl_beta"] = vsp.GetDoubleResults(stab_res, "CMl_Beta")[0]
+    vsp_dict["Cl_p"]    = vsp.GetDoubleResults(stab_res, "CMl_p")[0]
+    vsp_dict["Cl_r"]    = vsp.GetDoubleResults(stab_res, "CMl_r")[0]
+    vsp_dict["Cl_da"]   = vsp.GetDoubleResults(stab_res, "Roll_CMl")[0] # Roll from Aileron
+
+    # Pitch Moment (m) - OpenVSP uses "CMm"
+    vsp_dict["Cm_q"]    = vsp.GetDoubleResults(stab_res, "CMm_q")[0]
+    vsp_dict["Cm_de"]   = vsp.GetDoubleResults(stab_res, "Pitch_CMm")[0] # Pitch from Elevator
+
+    # Yaw Moment (n) - OpenVSP uses "CMn"
+    vsp_dict["Cn_beta"] = vsp.GetDoubleResults(stab_res, "CMn_Beta")[0]
+    vsp_dict["Cn_p"]    = vsp.GetDoubleResults(stab_res, "CMn_p")[0]
+    vsp_dict["Cn_r"]    = vsp.GetDoubleResults(stab_res, "CMn_r")[0]
+    vsp_dict["Cn_da"]   = vsp.GetDoubleResults(stab_res, "Roll_CMn")[0] # Adverse Yaw from Aileron
 
     with open(output_file, 'w', newline='') as f:
         writer = csv.writer(f)

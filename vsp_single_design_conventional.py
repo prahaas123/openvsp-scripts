@@ -41,39 +41,38 @@ vtail_params = {
 
 def main():
     # Aero sweep
-    # stl_path, analysis_path = generate_wing_and_tail("plane", wing_params, airfoil_file, htail_params)
-    # visualize_stl(stl_path)
+    stl_path, analysis_path = generate_wing_and_tail("plane", wing_params, airfoil_file, htail_params)
+    visualize_stl(stl_path)
 
-    # CL, CD, Cm = vsp_sweep(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
-    # aero_results = zip(alphas, CL, CD, Cm)
+    CL, CD, Cm = vsp_sweep(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
+    aero_results = zip(alphas, CL, CD, Cm)
 
-    # for filename in glob.glob(f"wing*"):
-    #     try:
-    #         os.remove(filename)
-    #     except OSError:
-    #         pass
+    for filename in glob.glob(f"wing*"):
+        try:
+            os.remove(filename)
+        except OSError:
+            pass
     
-    # aero_filename = "cfd_sweep.csv"
-    # aero_headers = ["Alpha_deg", "CL", "CD", "Cm"]
-    # with open(aero_filename, 'w', newline='') as f:
-    #     writer = csv.writer(f)
-    #     writer.writerow(aero_headers)     # Write the title row
-    #     writer.writerows(aero_results)    # Write all data rows
+    aero_filename = "cfd_sweep.csv"
+    aero_headers = ["Alpha_deg", "CL", "CD", "Cm"]
+    with open(aero_filename, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(aero_headers)     # Write the title row
+        writer.writerows(aero_results)    # Write all data rows
 
     # Stability Sweep
     stl_path, analysis_path = generate_wing_and_tail("plane", wing_params, airfoil_file, htail_params)
-    # visualize_stl(stl_path)
-    vsp_stability(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
+    stab_results = vsp_stability(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
     
-    # os.rename('plane.stab', 'STABILITY.txt')
-    # read_stability()
-    # os.remove("STABILITY.text")
+    os.rename('plane.stab', 'STABILITY.txt')
+    read_stability(stab_results)
+    os.remove("STABILITY.txt")
 
-    # for filename in glob.glob(f"plane*"):
-    #     try:
-    #         os.remove(filename)
-    #     except OSError:
-    #         pass
+    for filename in glob.glob(f"plane*"):
+        try:
+            os.remove(filename)
+        except OSError:
+            pass
 
 def generate_wing_and_tail(wing_name, wing_params, airfoil_file, htail_params):
     vsp.VSPCheckSetup()
@@ -81,7 +80,7 @@ def generate_wing_and_tail(wing_name, wing_params, airfoil_file, htail_params):
     
     # Main wing
     wing_id = vsp.AddGeom("WING")
-    vsp.SetGeomName(wing_id, "Main_Wing")
+    vsp.SetGeomName(wing_id, "MainWing")
     tip_chord = wing_params["root_chord"] * wing_params["taper"]
     vsp.SetParmVal(wing_id, "TotalSpan", "WingGeom", wing_params["span"])
     vsp.SetParmVal(wing_id, "Root_Chord", "XSec_1", wing_params["root_chord"])
@@ -112,7 +111,7 @@ def generate_wing_and_tail(wing_name, wing_params, airfoil_file, htail_params):
     
     # Horizontal tail
     htail_id = vsp.AddGeom("WING")
-    vsp.SetGeomName(htail_id, "Horizontal_Tail")
+    vsp.SetGeomName(htail_id, "HorizontalTail")
     vsp.SetParmVal(htail_id, "TotalSpan", "WingGeom", htail_params["span"])
     vsp.SetParmVal(htail_id, "Root_Chord", "XSec_1", htail_params["chord"])
     vsp.SetParmVal(htail_id, "Tip_Chord", "XSec_1", htail_params["chord"])
@@ -148,7 +147,7 @@ def generate_wing_and_tail(wing_name, wing_params, airfoil_file, htail_params):
     
     # Vertical tail
     vtail_id = vsp.AddGeom("WING")
-    vsp.SetGeomName(vtail_id, "Vertical_Tail")
+    vsp.SetGeomName(vtail_id, "VerticalTail")
     vsp.SetParmVal(vtail_id, "Sym_Planar_Flag", "Sym", 0.0)
     vsp.SetParmVal(vtail_id, "TotalSpan", "WingGeom", vtail_params["span"])
     vsp.SetParmVal(vtail_id, "Root_Chord", "XSec_1", vtail_params["chord"])
@@ -268,7 +267,7 @@ def vsp_stability(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     container_id = vsp.FindContainer("VSPAEROSettings", 0)
     elev_id = vsp.FindGeoms()[1]
     cs_id = vsp.GetSubSurf(elev_id, 0)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", "Horizontal_Tail_SS_CONT_0"), -1) # Since elevators are symmetrical
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", "HorizontalTail_SS_CONT_0"), -1) # Since elevators are symmetrical
     
     vsp.Update()
     print(f"--- Running Meshing ({geom_analysis}) ---")
@@ -297,62 +296,40 @@ def vsp_stability(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     
     vsp.SetDoubleAnalysisInput(aero_analysis, "Rho", [1.225])
     
-    vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", ["log.txt"])
     vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
 
     print(f"--- Running Stability Sweep ({aero_analysis}) ---")
     vsp.ExecAnalysis(aero_analysis)
     
     stab_results = vsp.FindLatestResultsID("VSPAERO_Stab")
-    vsp.PrintResults(stab_results)
+    return stab_results
 
-def read_stability(input_file="STABILITY.txt", output_file="vsp_derivatives.csv"):
-    target_aoa = "0.0000000" 
-    current_aoa = None
-    capture_derivatives = False
+def read_stability(stab_res, output_file="vsp_derivatives.csv"):
     vsp_dict = {}
-
-    with open(input_file, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line: continue
-
-            if line.startswith("AoA_"):
-                current_aoa = line.split()[1]
-                continue
-
-            if "Coef" in line and "Total" in line:
-                capture_derivatives = True
-                continue
-
-            if capture_derivatives and current_aoa == target_aoa:
-                parts = line.split()
-                if not parts: continue
                 
-                coef = parts[0]
-                
-                if coef == "CL": # Lift 
-                    vsp_dict["CL_de"]   = float(parts[10])  # Extra lift from elevator
-                elif coef == "CS":  # Side Force (Y)
-                    vsp_dict["CY_beta"] = float(parts[3])
-                    vsp_dict["CY_p"]    = float(parts[4])
-                    vsp_dict["CY_r"]    = float(parts[6])
-                elif coef == "CMl": # Roll Moment (l)
-                    vsp_dict["Cl_beta"] = float(parts[3])
-                    vsp_dict["Cl_p"]    = float(parts[4])
-                    vsp_dict["Cl_r"]    = float(parts[6])
-                    vsp_dict["Cl_da"]   = float(parts[9]) # Roll from Aileron
-                elif coef == "CMm": # Pitch Moment (m)
-                    vsp_dict["Cm_q"]    = float(parts[5])
-                    vsp_dict["Cm_de"]   = float(parts[10])  # Pitch from Elevator
-                elif coef == "CMn": # Yaw Moment (n)
-                    vsp_dict["Cn_beta"] = float(parts[3])
-                    vsp_dict["Cn_p"]    = float(parts[4])
-                    vsp_dict["Cn_r"]    = float(parts[6])
-                    vsp_dict["Cn_da"]   = float(parts[9]) # Adverse Yaw from Aileron
-                
-                elif "Result" in line or line.startswith("****"):
-                    capture_derivatives = False
+    # Lift
+    vsp_dict["CL_de"]   = vsp.GetDoubleResults(stab_res, "HorizontalTail_SS_CONT_0_CL")[0]
+
+    # Side Force (Y) - OpenVSP uses "CS"
+    vsp_dict["CY_beta"] = vsp.GetDoubleResults(stab_res, "CS_Beta")[0]
+    vsp_dict["CY_p"]    = vsp.GetDoubleResults(stab_res, "CS_p")[0]
+    vsp_dict["CY_r"]    = vsp.GetDoubleResults(stab_res, "CS_r")[0]
+
+    # Roll Moment (l) - OpenVSP uses "CMl"
+    vsp_dict["Cl_beta"] = vsp.GetDoubleResults(stab_res, "CMl_Beta")[0]
+    vsp_dict["Cl_p"]    = vsp.GetDoubleResults(stab_res, "CMl_p")[0]
+    vsp_dict["Cl_r"]    = vsp.GetDoubleResults(stab_res, "CMl_r")[0]
+    vsp_dict["Cl_da"]   = vsp.GetDoubleResults(stab_res, "MainWing_SS_CONT_0_CMl")[0] # Roll from Aileron
+
+    # Pitch Moment (m) - OpenVSP uses "CMm"
+    vsp_dict["Cm_q"]    = vsp.GetDoubleResults(stab_res, "CMm_q")[0]
+    vsp_dict["Cm_de"]   = vsp.GetDoubleResults(stab_res, "HorizontalTail_SS_CONT_0_CMm")[0] # Pitch from Elevator
+
+    # Yaw Moment (n) - OpenVSP uses "CMn"
+    vsp_dict["Cn_beta"] = vsp.GetDoubleResults(stab_res, "CMn_Beta")[0]
+    vsp_dict["Cn_p"]    = vsp.GetDoubleResults(stab_res, "CMn_p")[0]
+    vsp_dict["Cn_r"]    = vsp.GetDoubleResults(stab_res, "CMn_r")[0]
+    vsp_dict["Cn_da"]   = vsp.GetDoubleResults(stab_res, "MainWing_SS_CONT_0_CMn")[0] # Adverse Yaw from Aileron
 
     with open(output_file, 'w', newline='') as f:
         writer = csv.writer(f)
