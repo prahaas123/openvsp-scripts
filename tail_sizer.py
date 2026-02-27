@@ -247,7 +247,8 @@ def get_moment(fname_vspaerotests, velocity, alpha, x_cg, Sref, cref):
     vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
     vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [15]) 
     vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [100.0])
-
+    
+    vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
     rid = vsp.ExecAnalysis(aero_analysis)
 
     # Results

@@ -162,6 +162,7 @@ def vsp_point(fname_vspaerotests, vin, alpha, Sref, bref, cref):
     vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
     vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [15]) 
     vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [100.0])
+    vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
 
     print(f"--- Running Aero Sweep ({aero_analysis}) ---")
     rid = vsp.ExecAnalysis(aero_analysis)

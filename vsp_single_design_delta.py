@@ -124,6 +124,7 @@ def visualize_stl(stl_path):
 
 def vsp_sweep(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     # Load model
+    vsp.ClearVSPModel()
     vsp.ReadVSPFile(fname_vspaerotests)
     
     # Geometry
@@ -154,6 +155,7 @@ def vsp_sweep(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [15]) 
     vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [100.0])
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
+    vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
 
     print(f"--- Running Aero Sweep ({aero_analysis}) ---")
     rid = vsp.ExecAnalysis(aero_analysis)
@@ -226,6 +228,7 @@ def vsp_stability(fname_vspaerotests, vin, alphas, Sref, bref, cref):
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
 
     vsp.SetIntAnalysisInput(aero_analysis, "UnsteadyType", [1])
+    vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
 
     print(f"--- Running Stability Sweep ({aero_analysis}) ---")
     vsp.ExecAnalysis(aero_analysis)
