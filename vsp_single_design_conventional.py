@@ -44,7 +44,7 @@ def main():
     stl_path, analysis_path = generate_wing_and_tail("plane", wing_params, airfoil_file, htail_params)
     visualize_stl(stl_path)
 
-    CL, CD, Cm = vsp_sweep(analysis_path, velocity, [0.0], wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
+    CL, CD, Cm = vsp_sweep(analysis_path, velocity, alphas, wing_params["root_chord"] * wing_params["span"], wing_params["span"], wing_params["root_chord"])
     aero_results = zip(alphas, CL, CD, Cm)
 
     for filename in glob.glob(f"wing*"):
