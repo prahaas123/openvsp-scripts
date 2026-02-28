@@ -17,18 +17,18 @@ moment_tolerance = 0.05
 tail_sizing_iterations = 10
 
 wing_params = {
-    "span": 1.1,         # [m]
-    "root_chord": 0.20,  # [m]
-    "taper": 0.7,        # [Ratio]
-    "sweep": 0.0,        # [deg] Leading Edge Sweep
-    "dihedral": 0.0,     # [deg]
-    "twist": 0.0,        # [deg] Washout at tip
-    "alpha": 3.0         # [deg]
+    "span": 1.0,          # [m]
+    "root_chord": 0.231,  # [m]
+    "taper": 1.0,         # [Ratio]
+    "sweep": 0.0,         # [deg] Leading Edge Sweep
+    "dihedral": 0.0,      # [deg]
+    "twist": 0.0,         # [deg] Washout at tip
+    "alpha": 0.0          # [deg]
 }
 
 htail_params = {
-    "V_H": 0.3,          # Horizontal Tail Volume Coefficient (Typical: 0.4 - 0.6)
-    "l_H": 0.90,         # [cm] Tail Moment Arm (Distance from CG to Tail AC)
+    "V_H": 0.1,           # Horizontal Tail Volume Coefficient (Typical: 0.4 - 0.6)
+    "l_H": 0.379,         # [cm] Tail Moment Arm (Distance from CG to Tail AC)
     "airfoil": "0012",   
     "aspect_ratio": 3.5  
 }
@@ -92,6 +92,7 @@ def main():
     
     if success:
         print(f"Final Tail Alpha for Trim: {i_new:.4f} degrees with CMy = {m_new:.6f}")
+        print(f"Horizontal tail dimensions: Chord: {b_tail / htail_params["aspect_ratio"]:.3f}m, Span: {b_tail:.3f}m")
         generate_wing_and_htail("plane_final", wing_params, airfoil_file, htail_params, b_tail, i_new)
         visualize_stl("plane_final.stl")
 

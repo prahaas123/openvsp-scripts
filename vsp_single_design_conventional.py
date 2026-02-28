@@ -24,11 +24,11 @@ wing_params = {
 }
 
 htail_params = {
-    "chord": 0.142,
+    "chord": 0.132,
     "l_H": 0.379,            # [mm] Tail Moment Arm (Distance from CG to Tail AC)
     "airfoil": "0012",   
-    "span": 0.25,
-    "alpha": 0.0 
+    "span": 0.45,
+    "alpha": -6.85 
 }
 
 vtail_params = {
