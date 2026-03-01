@@ -38,7 +38,7 @@ def main():
     print("--- OPTIMIZATION COMPLETE. Saved to optimization_results.csv ---")
 
     for i in range(len(res.X)):
-        print(f"Design {i}: L/D={final_objectives[i,0]:.4f}, Lift={final_objectives[i,1]:.4f}")
+        print(f"Design {i}: L/D={final_objectives[i,0]:.4f}, CD={final_objectives[i,1]:.4f}")
         print(f"   Params: Root={res.X[i,0]:.2f}, Taper={res.X[i,1]:.2f}, Dihedral={res.X[i,2]:.2f}, Twist={res.X[i,3]:.2f}, Span={res.X[i,4]:.2f}")
         
     plot_parallel_coordinates()
@@ -48,7 +48,7 @@ class DeltaWingProblem(ElementwiseProblem):
         super().__init__(
             n_var=5,             # Number of variables 
             n_obj=2,             # Number of objectives 
-            n_constr=0,          # Constraints 
+            n_constr=1,          # Constraints 
             xl=np.array([0.5, 0.05, -10.0, -15.0, 0.5]), # Lower bounds for variables
             xu=np.array([2.0, 1.0, 10.0, 15.0, 2.0])  # Upper bounds for variables
         )
@@ -67,11 +67,13 @@ class DeltaWingProblem(ElementwiseProblem):
         try:
             stl_path, analysis_path = generate_wing(run_id, span, root_chord, taper, 0.0, dihedral, twist, airfoil)
             CL, CD, LD = vsp_point(analysis_path, velocity, alpha, 0.5 * (root_chord + root_chord * taper) * span, span, root_chord)
-            lift = 2 * CL * 1.225 * velocity * velocity * root_chord * span / 10000
-            out["F"] = [-LD, -lift]
+            lift = 2 * CL * 1.225 * velocity * velocity * root_chord * span
+            out["F"] = [-LD, CD]
+            out["G"] = 17 - lift
         except Exception as e:
             print(f"Run {run_id} failed: {e}")
             out["F"] = [1e10, 1e10] # Huge penalty
+            out["G"] = 1e10
         finally:
             for filename in glob.glob(f"{run_id}*"):
                 try:
