@@ -28,7 +28,7 @@ bounds = {
     "span":       (0.5, 2.0)      # meters
 }
 
-num_mc_samples = 1
+num_mc_samples = 3500
 
 def main():
     total_sims = num_mc_samples
@@ -283,6 +283,6 @@ def darr(v):
     
 if __name__ == "__main__":
     main()
-    # plot_parallel_coordinates()
-    # plot_pareto_front()
-    # plot_splom()
+    plot_parallel_coordinates()
+    plot_pareto_front()
+    plot_splom()
