@@ -113,7 +113,7 @@ def generate_wing(wing_name):
 def visualize_stl(stl_path):
     if os.path.exists(stl_path):
         mesh = pv.read(stl_path)
-        plotter = pv.Plotter(title="WatArrow Delta Wing")
+        plotter = pv.Plotter(title="Delta Wing")
         plotter.add_mesh(mesh, color="lightblue", show_edges=True, smooth_shading=True)
         plotter.add_axes()
         plotter.add_floor(face='-z', i_resolution=10, j_resolution=10, color='gray', opacity=0.2)
