@@ -1,16 +1,17 @@
 import os
-import openvsp as vsp
 import pyvista as pv
 import numpy as np
 import uuid
 import glob
 import pandas as pd
-import itertools
 import os
+import subprocess
 import time
 from tqdm import tqdm
 import plotly.express as px
 import plotly.graph_objects as go
+
+vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 20
 wing_chord_res = 50
@@ -19,29 +20,33 @@ alpha = 5 # degrees AoA
 
 airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
 
-ranges = {
-    "root_chord": np.linspace(0.5, 2.0, 4),     # meters
-    "taper":      np.linspace(0.1, 0.4, 4),     # ratio
-    "sweep":      np.linspace(40.0, 70.0, 4),   # degrees
-    "twist":      np.linspace(-10.0, 0.0, 3),   # degrees
-    "span":       np.linspace(0.5, 2.0, 3)      # meters
+bounds = {
+    "root_chord": (0.5, 2.0),     # meters
+    "taper":      (0.1, 0.4),     # ratio
+    "sweep":      (40.0, 70.0),   # degrees
+    "twist":      (-10.0, 0.0),   # degrees
+    "span":       (0.5, 2.0)      # meters
 }
 
+num_mc_samples = 1
+
 def main():
-    keys = list(ranges.keys())
-    values = list(ranges.values())
-    grid_points = list(itertools.product(*values))
-    
-    total_sims = len(grid_points)
-    print(f"--- STARTING PARAMETRIC SWEEP ---")
+    total_sims = num_mc_samples
+    print(f"--- STARTING MONTE CARLO SWEEP ---")
     print(f"Total Designs to Simulate: {total_sims}")
     print(f"Estimated Time (@5s/sim): {total_sims * 5 / 60:.1f} minutes")
     time.sleep(5)  # Brief pause before starting
     
     results = []
 
-    for point in tqdm(grid_points):
-        r_c, tap, swe, twi, wing = point
+    for i in tqdm(range(total_sims)):
+        r_c  = np.random.uniform(*bounds["root_chord"])
+        tap  = np.random.uniform(*bounds["taper"])
+        swe  = np.random.uniform(*bounds["sweep"])
+        twi  = np.random.uniform(*bounds["twist"])
+        wing = np.random.uniform(*bounds["span"])
+        
+        point = (r_c, tap, swe, twi, wing)
         run_id = f"wing_{uuid.uuid4().hex[:8]}"
         
         try:
@@ -75,55 +80,57 @@ def main():
     
     return df
 
-def generate_wing(wing_name, wingspan, root_chord, taper_ratio, sweep_angle, dihedral_angle, twist_angle, airfoil_file):
-    vsp.VSPCheckSetup()
-    vsp.ClearVSPModel()
-
-    # Create the wing
-    wing_id = vsp.AddGeom("WING")
-    
-    # Setting parameters
+def generate_wing(wing_name, span, root_chord, taper_ratio, sweep, dihedral, twist, airfoil_file):
     tip_chord = root_chord * taper_ratio
-    
-    vsp.SetParmVal(wing_id, "TotalSpan", "WingGeom", wingspan)
-    vsp.SetParmVal(wing_id, "Root_Chord", "XSec_1", root_chord)
-    vsp.SetParmVal(wing_id, "Tip_Chord", "XSec_1", tip_chord)
-    vsp.SetParmVal(wing_id, "Sweep", "XSec_1", sweep_angle)
-    vsp.SetParmVal(wing_id, "Dihedral", "XSec_1", dihedral_angle)
-    vsp.SetParmVal(wing_id, "Twist", "XSec_1", twist_angle)
-    vsp.SetParmVal(wing_id, "Twist_Location", "XSec_1", 1.0)
-    vsp.SetParmVal(wing_id, "SectTess_U", "XSec_1", wing_span_res)
-    vsp.SetParmVal(wing_id, "Tess_W", "Shape", wing_chord_res)
-    
-    # Airfoil selection    
-    root_xsec_surf = vsp.GetXSecSurf(wing_id, 0)
-    vsp.ChangeXSecShape(root_xsec_surf, 0, vsp.XS_FILE_AIRFOIL)
-    root_xsec = vsp.GetXSec(root_xsec_surf, 0)
-    vsp.ReadFileAirfoil(root_xsec, airfoil_file)
-    
-    tip_xsec_surf = vsp.GetXSecSurf(wing_id, 1)
-    vsp.ChangeXSecShape(tip_xsec_surf, 1, vsp.XS_FILE_AIRFOIL)
-    tip_xsec = vsp.GetXSec(tip_xsec_surf, 1)
-    vsp.ReadFileAirfoil(tip_xsec, airfoil_file)
-    
-    vsp.SetSetFlag(wing_id, 1, True)
+    airfoil_fwd = airfoil_file.replace("\\", "/")
 
-    # Finalize and xxport
-    vsp.Update()
-    
+    script_lines = [
+        "void main() {",
+        "    VSPCheckSetup();",
+        "    ClearVSPModel();",
+        f'    string wing_id = AddGeom( "WING" );',
+        f'    SetParmVal( wing_id, "TotalSpan",      "WingGeom", {span} );',
+        f'    SetParmVal( wing_id, "Root_Chord",     "XSec_1",   {root_chord} );',
+        f'    SetParmVal( wing_id, "Tip_Chord",      "XSec_1",   {tip_chord} );',
+        f'    SetParmVal( wing_id, "Sweep",          "XSec_1",   {sweep} );',
+        f'    SetParmVal( wing_id, "Dihedral",       "XSec_1",   {dihedral} );',
+        f'    SetParmVal( wing_id, "Twist",          "XSec_1",   {twist} );',
+        f'    SetParmVal( wing_id, "Twist_Location", "XSec_1",   1.0 );',
+        f'    SetParmVal( wing_id, "SectTess_U",     "XSec_1",   {wing_span_res}.0 );',
+        f'    SetParmVal( wing_id, "Tess_W",         "Shape",    {wing_chord_res}.0 );',
+        f'    string root_surf = GetXSecSurf( wing_id, 0 );',
+        f'    ChangeXSecShape( root_surf, 0, XS_FILE_AIRFOIL );',
+        f'    string root_xsec = GetXSec( root_surf, 0 );',
+        f'    ReadFileAirfoil( root_xsec, "{airfoil_fwd}" );',
+        f'    string tip_surf = GetXSecSurf( wing_id, 1 );',
+        f'    ChangeXSecShape( tip_surf, 1, XS_FILE_AIRFOIL );',
+        f'    string tip_xsec = GetXSec( tip_surf, 1 );',
+        f'    ReadFileAirfoil( tip_xsec, "{airfoil_fwd}" );',
+        f'    SetSetFlag( wing_id, 1, true );',
+        f'    Update();',
+        f'    WriteVSPFile( "{wing_name}.vsp3", SET_ALL );',
+        f'    ExportFile( "{wing_name}.stl", 0, EXPORT_STL );',
+        "}",
+    ]
+
+    script_path = f"{wing_name}_geom.vspscript"
+    with open(script_path, 'w') as f:
+        f.write("\n".join(script_lines))
+
+    print(f"--- Running geometry generation ({script_path}) ---")
+    subprocess.run([vsp_exe, "-script", script_path], check=True)
+    os.remove(script_path)
+
     stl_path = f"{wing_name}.stl"
-    analysis_path = f"{wing_name}.vsp3"
-    vsp.WriteVSPFile(analysis_path)
-    vsp.ExportFile(stl_path, 0, vsp.EXPORT_STL)
+    vsp3_path = f"{wing_name}.vsp3"
     print(f"STL generated: {stl_path}")
-    print(f"VSP file saved: {analysis_path}")
-    
-    return stl_path, analysis_path
+    print(f"VSP file saved: {vsp3_path}")
+    return stl_path, vsp3_path
 
 def visualize_stl(stl_path):
     if os.path.exists(stl_path):
         mesh = pv.read(stl_path)
-        plotter = pv.Plotter(title="WatArrow Delta Wing")
+        plotter = pv.Plotter(title="Delta Wing")
         plotter.add_mesh(mesh, color="lightblue", show_edges=True, smooth_shading=True)
         plotter.add_axes()
         plotter.add_floor(face='-z', i_resolution=10, j_resolution=10, color='gray', opacity=0.2)
@@ -132,46 +139,78 @@ def visualize_stl(stl_path):
     else:
         print("Error: STL not found.")
 
-def vsp_point(fname_vspaerotests, vin, alpha, Sref, bref, cref):
-    # Load model
-    vsp.ReadVSPFile(fname_vspaerotests)
-    
-    # Geometry
-    geom_analysis = "VSPAEROComputeGeometry"
-    vsp.SetAnalysisInputDefaults(geom_analysis)
-    
-    vsp.SetIntAnalysisInput(geom_analysis, "GeomSet", [vsp.SET_NONE])      
-    vsp.SetIntAnalysisInput(geom_analysis, "ThinGeomSet", [vsp.SET_SHOWN])
-    
-    print(f"--- Running Meshing ({geom_analysis}) ---")
-    vsp.ExecAnalysis(geom_analysis)
-
-    aero_analysis = "VSPAEROSweep"
-    vsp.SetAnalysisInputDefaults(aero_analysis)
-    
-    # Reference dimensions
-    vsp.SetDoubleAnalysisInput(aero_analysis, "Sref", [Sref])
-    vsp.SetDoubleAnalysisInput(aero_analysis, "cref", [cref])
-    vsp.SetDoubleAnalysisInput(aero_analysis, "bref", [bref])
-    
-    # Flight conditions    
-    vsp.SetDoubleAnalysisInput(aero_analysis, "AlphaStart", [alpha])
-    vsp.SetIntAnalysisInput(aero_analysis, "AlphaNpts", [1])    
+def vsp_point(vsp3_path, vin, alpha, Sref, bref, cref):
     mach = vin / 343.0
-    vsp.SetDoubleAnalysisInput(aero_analysis, "MachStart", [mach])
-    vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
-    vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [15]) 
-    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [100.0])
-    vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
 
-    print(f"--- Running Aero Sweep ({aero_analysis}) ---")
-    rid = vsp.ExecAnalysis(aero_analysis)
+    script_lines = [
+        "void main() {",
+        f'    ClearVSPModel();',
+        f'    ReadVSPFile( "{vsp3_path}" );',
+        f'    SetAnalysisInputDefaults( "VSPAEROComputeGeometry" );',
+        f'    array< int > thick_set = GetIntAnalysisInput( "VSPAEROComputeGeometry", "GeomSet" );',
+        f'    array< int > thin_set = GetIntAnalysisInput( "VSPAEROComputeGeometry", "ThinGeomSet" );',
+        f'    thick_set[0] = ( SET_TYPE::SET_NONE );',
+        f'    thin_set[0] = ( SET_TYPE::SET_ALL );',
+        f'    SetIntAnalysisInput( "VSPAEROComputeGeometry", "GeomSet", thick_set );',
+        f'    SetIntAnalysisInput( "VSPAEROComputeGeometry", "ThinGeomSet", thin_set );',
+        f'    Print( "--- Running Meshing ---" );',
+        f'    ExecAnalysis( "VSPAEROComputeGeometry" );',
+        f'    SetAnalysisInputDefaults( "VSPAEROSweep" );',
+        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Sref",           {darr(Sref)}, 0 );',
+        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "cref",           {darr(cref)}, 0 );',
+        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "bref",           {darr(bref)}, 0 );',
+        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaStart",     {darr(float(alpha))}, 0 );',
+        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaEnd",       {darr(float(alpha))}, 0 );',
+        f'    SetIntAnalysisInput(    "VSPAEROSweep", "AlphaNpts",      {iarr(1)}, 0 );',
+        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "MachStart",      {darr(mach)}, 0 );',
+        f'    SetIntAnalysisInput(    "VSPAEROSweep", "MachNpts",       {iarr(1)}, 0 );',
+        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Vinf",           {darr(100.0)}, 0 );',
+        f'    SetIntAnalysisInput(    "VSPAEROSweep", "WakeNumIter",    {iarr(15)}, 0 );',
+        f'    SetIntAnalysisInput(    "VSPAEROSweep", "NCPU",           {iarr(8)}, 0 );',
+        f'    Print( "--- Running Aero Point ---" );',
+        f'    ExecAnalysis( "VSPAEROSweep" );',
+        "}",
+    ]
 
-    # Results
-    polar_res = vsp.FindLatestResultsID("VSPAERO_Polar")
-    cl = vsp.GetDoubleResults(polar_res, "CLtot")[0]
-    cd = vsp.GetDoubleResults(polar_res, "CDtot")[0]
-    return cl, cd, cl/cd
+    script_path = "point.vspscript"
+    with open(script_path, 'w') as f:
+        f.write("\n".join(script_lines))
+
+    print(f"--- Running aero point (alpha={alpha}) ---")
+    subprocess.run([vsp_exe, "-script", script_path], check=True)
+    os.remove(script_path)
+
+    polar_file = vsp3_path.replace(".vsp3", ".polar")
+    CL, CD, _ = parse_polar(polar_file)
+    cl = CL[0]
+    cd = CD[0]
+    return cl, cd, cl / cd
+
+def parse_polar(polar_path):
+    CL, CD, Cm = [], [], []
+    col_cl = col_cd = col_cm = None
+ 
+    with open(polar_path, 'r') as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+            tokens = stripped.split()
+            if tokens[0] == 'Beta':
+                col_cl = tokens.index('CLtot')
+                col_cd = tokens.index('CDtot')
+                col_cm = tokens.index('CMytot')
+                continue
+            if col_cl is None:
+                continue
+            try:
+                CL.append(float(tokens[col_cl]))
+                CD.append(float(tokens[col_cd]))
+                Cm.append(float(tokens[col_cm]))
+            except (ValueError, IndexError):
+                continue
+ 
+    return CL, CD, Cm
 
 def plot_parallel_coordinates():
     df = pd.read_csv("sweep_results.csv")
@@ -235,8 +274,15 @@ def plot_splom():
     fig.update_layout(height=800, width=1000)
     fig.show()
     
+# AngelScript array helpers
+def iarr(v):
+    return f"array<int> = {{{v}}}"
+
+def darr(v):
+    return f"array<double> = {{{v}}}"
+    
 if __name__ == "__main__":
-    # main()
-    plot_parallel_coordinates()
-    plot_pareto_front()
-    plot_splom()
+    main()
+    # plot_parallel_coordinates()
+    # plot_pareto_front()
+    # plot_splom()
