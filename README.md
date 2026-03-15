@@ -11,7 +11,7 @@ Python scripts to automate aerodynamic analysis and concept design workflows usi
 
 ---
 
-## `vsp_design_space_explore.py`
+### `vsp_design_space_explore.py`
 
 Design space exploration — Monte Carlo analysis of the various possible parameter configurations.
 
@@ -22,7 +22,7 @@ Design space exploration — Monte Carlo analysis of the various possible parame
 
 ---
 
-## `vsp_optimization.py`
+### `vsp_optimization.py`
 
 Single-objective aerodynamic optimization using OpenVSP + VSPAERO as the analysis backend.
 
@@ -32,7 +32,7 @@ Single-objective aerodynamic optimization using OpenVSP + VSPAERO as the analysi
 
 ---
 
-## `tail_sizer.py`
+### `tail_sizer.py`
 
 Automated horizontal tail sizing and pitch trim analysis using a secant method iteration loop.
 
@@ -43,7 +43,7 @@ Automated horizontal tail sizing and pitch trim analysis using a secant method i
 
 ---
 
-## `vsp_single_design_delta.py`
+### `vsp_single_design_delta.py`
 
 Runs a full aero + stability analysis on a tailless delta wing configuration.
 
@@ -54,7 +54,7 @@ Runs a full aero + stability analysis on a tailless delta wing configuration.
 
 ---
 
-## `vsp_single_design_conventional.py`
+### `vsp_single_design_conventional.py`
 
 Runs a full aero + stability analysis on a conventional aircraft configuration (wing + horizontal tail + vertical tail).
 
@@ -65,7 +65,7 @@ Runs a full aero + stability analysis on a conventional aircraft configuration (
 
 ---
 
-## `ScoringSensititivity.py`
+### `scoring_sensititivity.py`
 
 Sensitivity analysis script — evaluates how changes in individual design parameters affect a scoring metric.
 
