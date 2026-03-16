@@ -4,12 +4,10 @@ import pyvista as pv
 import numpy as np
 import glob
 import uuid
-import pandas as pd
-import plotly.express as px
 from pymoo.algorithms.soo.nonconvex.de import DE
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.optimize import minimize
-from pymoo.termination import get_termination
+from pymoo.termination.default import DefaultSingleObjectiveTermination
 
 vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
@@ -30,7 +28,14 @@ def main():
         dither="vector",
         jitter=False
     )
-    termination = get_termination("ftol", tol=0.005, n_last=5, n_max_gen=10)
+    termination = DefaultSingleObjectiveTermination(
+        xtol=1e-8,
+        cvtol=1e-6,
+        ftol=1e-6,
+        period=20,
+        n_max_gen=5,
+        n_max_evals=100000
+    )
     problem = DeltaWingProblem()
 
     print("Starting Optimization...")
@@ -38,12 +43,19 @@ def main():
 
     print(f"Optimization finished.")
     
-    best_x = res.X
+    best_root = res.X[0]
+    best_taper = res.X[1]
+    best_sweep = res.X[2]
+    best_twist = res.X[3]
+    best_span = res.X[4]
     best_ld = -res.F[0]
     
     print("\n--- OPTIMAL WING GEOMETRY ---")
     print(f"L/D Ratio: {best_ld:.4f}")
-    print(f"Params: Root={best_x[0]:.2f}, Taper={best_x[1]:.2f}, Sweep={best_x[2]:.2f}, Twist={best_x[3]:.2f}, Span={best_x[4]:.2f}")
+    print(f"Params: Root={best_root:.2f}, Taper={best_taper:.2f}, Sweep={best_sweep:.2f}, Twist={best_twist:.2f}, Span={best_span:.2f}")
+    
+    stl_path, _ = generate_wing("Optimized_Wing", best_span, best_root, best_taper, best_sweep, 0.0, best_twist, airfoil_file)
+    visualize_stl(stl_path)
         
 class DeltaWingProblem(ElementwiseProblem):
     def __init__(self):
