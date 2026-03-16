@@ -18,6 +18,12 @@ alpha = 5 # degrees AoA
 
 airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
 
+SCORING = {
+    # term_name   : (weight,  reference_value)
+    "ld_ratio"   : (0.7,     15.0),  # typical/target L/D
+    "wetted_area": (0.3,      2.0),  # reference wetted area (m²)
+}
+
 def main():    
     # Define the algorithm
     algorithm = DE(
@@ -48,11 +54,27 @@ def main():
     best_sweep = res.X[2]
     best_twist = res.X[3]
     best_span = res.X[4]
-    best_ld = -res.F[0]
+    best_score = -res.F[0]
     
+    # Results Summary
+    best_wetted = estimate_wetted_area(best_root, best_taper, best_span)
+    w_ld, ref_ld   = SCORING["ld_ratio"]
+    w_wet, ref_wet = SCORING["wetted_area"]
+    best_ld = (best_score + w_wet * (best_wetted / ref_wet)) / w_ld * ref_ld
+    best_wetted = estimate_wetted_area(best_root, best_taper, best_span)
+    _, breakdown = compute_score(best_ld, best_wetted)
+ 
     print("\n--- OPTIMAL WING GEOMETRY ---")
-    print(f"L/D Ratio: {best_ld:.4f}")
-    print(f"Params: Root={best_root:.2f}, Taper={best_taper:.2f}, Sweep={best_sweep:.2f}, Twist={best_twist:.2f}, Span={best_span:.2f}")
+    print(f"Score      : {best_score:.4f}  (weighted sum — higher is better)")
+    print(f"\n--- SCORE BREAKDOWN ---")
+    for term, contribution in breakdown.items():
+        w, ref = SCORING[term]
+        print(f"  {term:<14}: contribution={contribution:+.4f}  (weight={w}, reference={ref})")
+    print(f"\n--- PARAMETERS ---")
+    print(f"Wetted area: {best_wetted:.4f} m²")
+    print(f"L/D: {best_ld:.4f} m²")
+    print(f"Params     : Root={best_root:.2f}  Taper={best_taper:.2f}  "
+          f"Sweep={best_sweep:.2f}  Twist={best_twist:.2f}  Span={best_span:.2f}")
     
     stl_path, _ = generate_wing("Optimized_Wing", best_span, best_root, best_taper, best_sweep, 0.0, best_twist, airfoil_file)
     visualize_stl(stl_path)
@@ -80,7 +102,14 @@ class DeltaWingProblem(ElementwiseProblem):
             stl_path, analysis_path = generate_wing(run_id, span, root_chord, taper, sweep, 0.0, twist, airfoil_file)
             CL, CD, LD = vsp_point(analysis_path, velocity, alpha, 0.5 * (root_chord + root_chord * taper) * span, span, root_chord)
             lift = 2 * CL * 1.225 * velocity * velocity * root_chord * span
-            out["F"] = [-LD]
+            wetted_area = estimate_wetted_area(root_chord, taper, span)
+            score, breakdown = compute_score(LD, wetted_area)
+            print(
+                f"  [{run_id}] L/D={LD:.3f}  wetted={wetted_area:.4f} m²  "
+                + "  ".join(f"{k}={v:+.4f}" for k, v in breakdown.items())
+                + f"  → score={score:.4f}"
+            )
+            out["F"] = [-score]
             out["G"] = 17 - lift
         except Exception as e:
             print(f"Run {run_id} failed: {e}")
@@ -224,6 +253,26 @@ def parse_polar(polar_path):
                 continue
  
     return CL, CD, Cm
+
+def compute_score(ld, wetted_area):
+    w_ld,  ref_ld  = SCORING["ld_ratio"]
+    w_wet, ref_wet = SCORING["wetted_area"]
+ 
+    term_ld  =  w_ld  * (ld / ref_ld)   # positive: reward high L/D
+    term_wet = -w_wet * (wetted_area / ref_wet)  # negative: penalise large area
+ 
+    score = term_ld + term_wet
+ 
+    breakdown = {
+        "ld_ratio"   : term_ld,
+        "wetted_area": term_wet,
+    }
+    return score, breakdown
+
+def estimate_wetted_area(root_chord, taper, span):
+    tip_chord     = root_chord * taper
+    planform_area = 0.5 * (root_chord + tip_chord) * span
+    return 2.0 * planform_area * 1.02
 
 # AngelScript array helpers
 def iarr(v):
