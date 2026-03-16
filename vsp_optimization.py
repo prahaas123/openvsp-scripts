@@ -21,7 +21,7 @@ airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils
 def main():    
     # Define the algorithm
     algorithm = DE(
-        pop_size=10,
+        pop_size=50,
         variant="DE/rand/1/bin",
         CR=0.9,                  
         F=0.8,                    # This acts as the base mutation weight
@@ -33,7 +33,7 @@ def main():
         cvtol=1e-6,
         ftol=1e-6,
         period=20,
-        n_max_gen=5,
+        n_max_gen=30,
         n_max_evals=100000
     )
     problem = DeltaWingProblem()
