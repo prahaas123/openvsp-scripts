@@ -6,8 +6,8 @@ import glob
 import uuid
 import pandas as pd
 import plotly.express as px
+from pymoo.algorithms.soo.nonconvex.de import DE
 from pymoo.core.problem import ElementwiseProblem
-from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.optimize import minimize
 from pymoo.termination import get_termination
 
@@ -22,57 +22,57 @@ airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils
 
 def main():    
     # Define the algorithm
-    algorithm = NSGA2(pop_size=10, eliminate_duplicates=True)
-    termination = get_termination("n_gen", 10)
+    algorithm = DE(
+        pop_size=10,
+        variant="DE/rand/1/bin",
+        CR=0.9,                  
+        F=0.8,                    # This acts as the base mutation weight
+        dither="vector",
+        jitter=False
+    )
+    termination = get_termination("ftol", tol=0.005, n_last=5, n_max_gen=10)
     problem = DeltaWingProblem()
 
     print("Starting Optimization...")
     res = minimize(problem, algorithm, termination, seed=1, save_history=True, verbose=True)
 
-    print(f"Optimization finished. Found {len(res.X)} solutions in the Pareto front.")
+    print(f"Optimization finished.")
     
-    final_objectives = -res.F 
+    best_x = res.X
+    best_ld = -res.F[0]
     
-    data = np.hstack([res.X, final_objectives])
-    columns = ["Root_Chord", "Taper", "Dihedral", "Twist", "Span", "L_D", "CD"] 
-    df = pd.DataFrame(data, columns=columns)
-    df.to_csv("optimization_results.csv", index=False)
-    print("--- OPTIMIZATION COMPLETE. Saved to optimization_results.csv ---")
-
-    for i in range(len(res.X)):
-        print(f"Design {i}: L/D={final_objectives[i,0]:.4f}, CD={final_objectives[i,1]:.4f}")
-        print(f"   Params: Root={res.X[i,0]:.2f}, Taper={res.X[i,1]:.2f}, Dihedral={res.X[i,2]:.2f}, Twist={res.X[i,3]:.2f}, Span={res.X[i,4]:.2f}")
-        
-    plot_parallel_coordinates()
+    print("\n--- OPTIMAL WING GEOMETRY ---")
+    print(f"L/D Ratio: {best_ld:.4f}")
+    print(f"Params: Root={best_x[0]:.2f}, Taper={best_x[1]:.2f}, Sweep={best_x[2]:.2f}, Twist={best_x[3]:.2f}, Span={best_x[4]:.2f}")
         
 class DeltaWingProblem(ElementwiseProblem):
     def __init__(self):
         super().__init__(
             n_var=5,             # Number of variables 
-            n_obj=2,             # Number of objectives 
+            n_obj=1,             # Number of objectives 
             n_constr=1,          # Constraints 
-            xl=np.array([0.5, 0.05, -10.0, -15.0, 0.5]), # Lower bounds for variables
-            xu=np.array([2.0, 1.0, 10.0, 15.0, 2.0])  # Upper bounds for variables
+            xl=np.array([0.5, 0.05, 0.0, -15.0, 0.5]), # Lower bounds for variables
+            xu=np.array([2.0, 1.0, 50.0, 15.0, 2.0])  # Upper bounds for variables
         )
 
     def _evaluate(self, x, out, *args, **kwargs):
         root_chord = x[0]
         taper      = x[1]
-        dihedral   = x[2]
+        sweep      = x[2]
         twist      = x[3]
         span       = x[4]
 
         run_id = f"wing_{uuid.uuid4().hex[:8]}" 
         
         try:
-            stl_path, analysis_path = generate_wing(run_id, span, root_chord, taper, 0.0, dihedral, twist, airfoil_file)
+            stl_path, analysis_path = generate_wing(run_id, span, root_chord, taper, sweep, 0.0, twist, airfoil_file)
             CL, CD, LD = vsp_point(analysis_path, velocity, alpha, 0.5 * (root_chord + root_chord * taper) * span, span, root_chord)
             lift = 2 * CL * 1.225 * velocity * velocity * root_chord * span
-            out["F"] = [-LD, CD]
+            out["F"] = [-LD]
             out["G"] = 17 - lift
         except Exception as e:
             print(f"Run {run_id} failed: {e}")
-            out["F"] = [1e10, 1e10] # Huge penalty
+            out["F"] = [1e10] # Huge penalty
             out["G"] = 1e10
         finally:
             for filename in glob.glob(f"{run_id}*"):
@@ -212,18 +212,6 @@ def parse_polar(polar_path):
                 continue
  
     return CL, CD, Cm
-
-def plot_parallel_coordinates():
-    df = pd.read_csv("optimization_results.csv")
-    fig = px.parallel_coordinates(
-        df,
-        color="L_D",
-        color_continuous_scale='Plasma',
-        dimensions=["Root_Chord", "Taper", "Dihedral", "Twist", "Span", "L_D"],
-        title="Design Genetic Optimization: Geometry vs L/D",
-        template="plotly_dark"
-    )
-    fig.show()
 
 # AngelScript array helpers
 def iarr(v):
