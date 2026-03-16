@@ -16,29 +16,29 @@ airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils
 x_cg = 0.06
 
 wing_params = {
-    "span": 1.0,         # [m]
-    "root_chord": 0.231, # [m]
-    "taper": 1.0,        # [Ratio]
-    "sweep": 0.0,        # [deg] Leading Edge Sweep
-    "dihedral": 0.0,     # [deg]
-    "twist": 0.0,        # [deg] Washout at tip
-    "alpha": 0.0         # [deg]
+    "span": 1.3,          # [m]
+    "root_chord": 0.15,   # [m]
+    "taper": 0.7,         # [Ratio]
+    "sweep": 5.0,         # [deg] Leading Edge Sweep
+    "dihedral": 0.0,      # [deg]
+    "twist": 0.0,         # [deg] Washout at tip
+    "alpha": 2.5          # [deg]
 }
 
 htail_params = {
-    "chord": 0.132,
-    "l_H": 0.379,        # [m] Tail Moment Arm (Distance from CG to Tail AC)
+    "chord": 0.1,
+    "l_H": 0.65,        # [m] Tail Moment Arm (Distance from CG to Tail AC)
     "airfoil": "0012",
-    "span": 0.45,
-    "alpha": -6.85
+    "span": 0.6,
+    "alpha": -0.5
 }
 
 vtail_params = {
-    "chord": 0.142,
+    "chord": 0.15,
     "airfoil": "0012",
     "span": 0.18,
-    "taper": 0.75,
-    "sweep": 20.0
+    "taper": 0.6,
+    "sweep": 25.0
 }
 
 def main():

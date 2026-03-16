@@ -1,5 +1,6 @@
 # Ignore airfoils folder
 Airfoils/
 *.dat
+*.csv
 plane*
 wing*
