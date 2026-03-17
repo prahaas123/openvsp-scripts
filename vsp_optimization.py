@@ -24,10 +24,15 @@ SCORING = {
     "wetted_area": (0.3,      2.0),  # reference wetted area (m²)
 }
 
-def main():    
+STATIC_MARGIN = 0.10
+CM_MIN = -0.05   # lower bound on CM about CG
+CM_MAX =  0.05   # upper bound on CM about CG
+AR_MIN = 6.0
+
+def main():   
     # Define the algorithm
     algorithm = DE(
-        pop_size=50,
+        pop_size=10,
         variant="DE/rand/1/bin",
         CR=0.9,                  
         F=0.8,                    # This acts as the base mutation weight
@@ -39,7 +44,7 @@ def main():
         cvtol=1e-6,
         ftol=1e-6,
         period=20,
-        n_max_gen=30,
+        n_max_gen=3,
         n_max_evals=100000
     )
     problem = DeltaWingProblem()
@@ -61,9 +66,11 @@ def main():
     w_ld, ref_ld   = SCORING["ld_ratio"]
     w_wet, ref_wet = SCORING["wetted_area"]
     best_ld = (best_score + w_wet * (best_wetted / ref_wet)) / w_ld * ref_ld
-    best_wetted = estimate_wetted_area(best_root, best_taper, best_span)
     _, breakdown = compute_score(best_ld, best_wetted)
- 
+
+    best_x_cg = calc_cg(best_root, best_taper, best_span, best_sweep)
+    best_ar = aspect_ratio(best_root, best_taper, best_span)
+
     print("\n--- OPTIMAL WING GEOMETRY ---")
     print(f"Score      : {best_score:.4f}  (weighted sum — higher is better)")
     print(f"\n--- SCORE BREAKDOWN ---")
@@ -71,8 +78,10 @@ def main():
         w, ref = SCORING[term]
         print(f"  {term:<14}: contribution={contribution:+.4f}  (weight={w}, reference={ref})")
     print(f"\n--- PARAMETERS ---")
-    print(f"Wetted area: {best_wetted:.4f} m²")
-    print(f"L/D: {best_ld:.4f} m²")
+    print(f"L/D         : {best_ld:.4f}")
+    print(f"Wetted area : {best_wetted:.4f} m²")
+    print(f"Aspect ratio: {best_ar:.4f}  (min allowed: {AR_MIN})")
+    print(f"CG          : {best_x_cg:.4f} m  (aft of root LE,  SM={STATIC_MARGIN*100:.0f}% MAC)")
     print(f"Params     : Root={best_root:.2f}  Taper={best_taper:.2f}  "
           f"Sweep={best_sweep:.2f}  Twist={best_twist:.2f}  Span={best_span:.2f}")
     
@@ -82,9 +91,9 @@ def main():
 class DeltaWingProblem(ElementwiseProblem):
     def __init__(self):
         super().__init__(
-            n_var=5,             # Number of variables 
-            n_obj=1,             # Number of objectives 
-            n_constr=1,          # Constraints 
+            n_var=5,             # Number of variables
+            n_obj=1,             # Number of objectives
+            n_constr=3,          # Number of constraints
             xl=np.array([0.5, 0.05, 0.0, -15.0, 0.5]), # Lower bounds for variables
             xu=np.array([2.0, 1.0, 50.0, 15.0, 2.0])  # Upper bounds for variables
         )
@@ -100,21 +109,33 @@ class DeltaWingProblem(ElementwiseProblem):
         
         try:
             stl_path, analysis_path = generate_wing(run_id, span, root_chord, taper, sweep, 0.0, twist, airfoil_file)
-            CL, CD, LD = vsp_point(analysis_path, velocity, alpha, 0.5 * (root_chord + root_chord * taper) * span, span, root_chord)
-            lift = 2 * CL * 1.225 * velocity * velocity * root_chord * span
+            Sref = 0.5 * (root_chord + root_chord * taper) * span
+            x_cg = calc_cg(root_chord, taper, span, sweep)
+            CL, CD, LD, CM_cg = vsp_point(analysis_path, velocity, alpha, Sref, span, root_chord, x_cg)
+            lift = 0.5 * CL * 1.225 * velocity * velocity * Sref
+
+            AR    = aspect_ratio(root_chord, taper, span)
             wetted_area = estimate_wetted_area(root_chord, taper, span)
             score, breakdown = compute_score(LD, wetted_area)
+
             print(
                 f"  [{run_id}] L/D={LD:.3f}  wetted={wetted_area:.4f} m²  "
+                f"CM_cg={CM_cg:.4f}  AR={AR:.2f}  "
                 + "  ".join(f"{k}={v:+.4f}" for k, v in breakdown.items())
                 + f"  → score={score:.4f}"
             )
+
             out["F"] = [-score]
-            out["G"] = 17 - lift
+            g_lift = 17.0 - lift                    # lift must be >= 17 N
+            g_cm   = max(CM_cg - CM_MAX,            # CM must be <= CM_MAX
+                         CM_MIN - CM_cg)            # CM must be >= CM_MIN
+            g_ar   = AR_MIN - AR                    # AR must be >= AR_MIN
+            out["G"] = [g_lift, g_cm, g_ar]
+
         except Exception as e:
             print(f"Run {run_id} failed: {e}")
-            out["F"] = [1e10] # Huge penalty
-            out["G"] = 1e10
+            out["F"] = [1e10]
+            out["G"] = [1e10, 1e10, 1e10]
         finally:
             for filename in glob.glob(f"{run_id}*"):
                 try:
@@ -181,7 +202,7 @@ def visualize_stl(stl_path):
     else:
         print("Error: STL not found.")
 
-def vsp_point(vsp3_path, vin, alpha, Sref, bref, cref):
+def vsp_point(vsp3_path, vin, alpha, Sref, bref, cref, x_cg):
     mach = vin / 343.0
 
     script_lines = [
@@ -201,6 +222,7 @@ def vsp_point(vsp3_path, vin, alpha, Sref, bref, cref):
         f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Sref",           {darr(Sref)}, 0 );',
         f'    SetDoubleAnalysisInput( "VSPAEROSweep", "cref",           {darr(cref)}, 0 );',
         f'    SetDoubleAnalysisInput( "VSPAEROSweep", "bref",           {darr(bref)}, 0 );',
+        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Xcg",            {darr(x_cg)}, 0 );',
         f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaStart",     {darr(float(alpha))}, 0 );',
         f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaEnd",       {darr(float(alpha))}, 0 );',
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "AlphaNpts",      {iarr(1)}, 0 );',
@@ -223,10 +245,11 @@ def vsp_point(vsp3_path, vin, alpha, Sref, bref, cref):
     os.remove(script_path)
 
     polar_file = vsp3_path.replace(".vsp3", ".polar")
-    CL, CD, _ = parse_polar(polar_file)
-    cl = CL[0]
-    cd = CD[0]
-    return cl, cd, cl / cd
+    CL, CD, Cm = parse_polar(polar_file)
+    cl   = CL[0]
+    cd   = CD[0]
+    cm   = Cm[0]   # pitching moment about VSP reference point
+    return cl, cd, cl / cd, cm
 
 def parse_polar(polar_path):
     CL, CD, Cm = [], [], []
@@ -273,6 +296,18 @@ def estimate_wetted_area(root_chord, taper, span):
     tip_chord     = root_chord * taper
     planform_area = 0.5 * (root_chord + tip_chord) * span
     return 2.0 * planform_area * 1.02
+
+def calc_cg(root_chord, taper, span, sweep_angle, static_margin=STATIC_MARGIN):
+    mac   = (2.0 / 3.0) * root_chord * (1 + taper + taper**2) / (1 + taper)
+    y_mac = (span / 2.0) * (1 + 2 * taper) / (3 * (1 + taper))
+    x_ac  = y_mac * np.tan(np.radians(sweep_angle)) + 0.25 * mac
+    x_cg  = x_ac - static_margin * mac
+    return x_cg
+
+def aspect_ratio(root_chord, taper, span):
+    tip_chord     = root_chord * taper
+    planform_area = 0.5 * (root_chord + tip_chord) * span
+    return span**2 / planform_area
 
 # AngelScript array helpers
 def iarr(v):
