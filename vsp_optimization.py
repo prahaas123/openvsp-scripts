@@ -25,9 +25,9 @@ SCORING = {
 }
 
 STATIC_MARGIN = 0.10
-CM_MIN = -0.05   # lower bound on CM about CG
-CM_MAX =  0.05   # upper bound on CM about CG
-AR_MIN = 6.0
+CM_MIN = -0.15   # lower bound on CM about CG
+CM_MAX =  0.15   # upper bound on CM about CG
+AR_MIN = 4.0
 
 def main():   
     # Define the algorithm
@@ -94,8 +94,8 @@ class DeltaWingProblem(ElementwiseProblem):
             n_var=5,             # Number of variables
             n_obj=1,             # Number of objectives
             n_constr=3,          # Number of constraints
-            xl=np.array([0.5, 0.05, 0.0, -15.0, 0.5]), # Lower bounds for variables
-            xu=np.array([2.0, 1.0, 50.0, 15.0, 2.0])  # Upper bounds for variables
+            xl=np.array([0.1, 0.05, 0.0, -15.0, 0.5]), # Lower bounds for variables
+            xu=np.array([0.25, 1.0, 60.0, 5.0, 0.9])   # Upper bounds for variables
         )
 
     def _evaluate(self, x, out, *args, **kwargs):
@@ -126,7 +126,7 @@ class DeltaWingProblem(ElementwiseProblem):
             )
 
             out["F"] = [-score]
-            g_lift = 17.0 - lift                    # lift must be >= 17 N
+            g_lift = 6.0 - lift                     # lift must be >= 6 N
             g_cm   = max(CM_cg - CM_MAX,            # CM must be <= CM_MAX
                          CM_MIN - CM_cg)            # CM must be >= CM_MIN
             g_ar   = AR_MIN - AR                    # AR must be >= AR_MIN
