@@ -13,7 +13,7 @@ vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 20
 wing_chord_res = 50
-velocity = 10 # m/s
+velocity = 20 # m/s
 alpha = 5 # degrees AoA
 
 airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
@@ -21,7 +21,7 @@ airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils
 SCORING = {
     # term_name   : (weight,  reference_value)
     "ld_ratio"   : (0.7,     15.0),  # typical/target L/D
-    "wetted_area": (0.3,      2.0),  # reference wetted area (m²)
+    "wetted_area": (0.3,      0.2),  # reference wetted area (m²)
 }
 
 STATIC_MARGIN = 0.10
@@ -82,8 +82,8 @@ def main():
     print(f"Wetted area : {best_wetted:.4f} m²")
     print(f"Aspect ratio: {best_ar:.4f}  (min allowed: {AR_MIN})")
     print(f"CG          : {best_x_cg:.4f} m  (aft of root LE,  SM={STATIC_MARGIN*100:.0f}% MAC)")
-    print(f"Params     : Root={best_root:.2f}  Taper={best_taper:.2f}  "
-          f"Sweep={best_sweep:.2f}  Twist={best_twist:.2f}  Span={best_span:.2f}")
+    print(f"Params     : Root={best_root:.2f}  Taper={best_taper:.2f} Sweep={best_sweep:.2f}  Twist={best_twist:.2f}  Span={best_span:.2f}")
+    print(" ")
     
     stl_path, _ = generate_wing("Optimized_Wing", best_span, best_root, best_taper, best_sweep, 0.0, best_twist, airfoil_file)
     visualize_stl(stl_path)
