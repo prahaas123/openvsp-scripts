@@ -21,18 +21,19 @@ airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils
 SCORING = {
     # term_name   : (weight,  reference_value)
     "ld_ratio"   : (0.7,     15.0),  # typical/target L/D
-    "wetted_area": (0.3,      0.2),  # reference wetted area (m²)
+    "wetted_area": (0.3,      0.1),  # reference wetted area (m²)
 }
 
-STATIC_MARGIN = 0.10
-CM_MIN = -0.15   # lower bound on CM about CG
-CM_MAX =  0.15   # upper bound on CM about CG
+MAX_WEIGHT = 6   # Newtons
+STATIC_MARGIN = 0.05
+CM_MIN = -0.08   # lower bound on CM about CG
+CM_MAX =  0.08   # upper bound on CM about CG
 AR_MIN = 4.0
 
 def main():   
     # Define the algorithm
     algorithm = DE(
-        pop_size=10,
+        pop_size=30,
         variant="DE/rand/1/bin",
         CR=0.9,                  
         F=0.8,                    # This acts as the base mutation weight
@@ -44,7 +45,7 @@ def main():
         cvtol=1e-6,
         ftol=1e-6,
         period=20,
-        n_max_gen=3,
+        n_max_gen=30,
         n_max_evals=100000
     )
     problem = DeltaWingProblem()
@@ -82,7 +83,7 @@ def main():
     print(f"Wetted area : {best_wetted:.4f} m²")
     print(f"Aspect ratio: {best_ar:.4f}  (min allowed: {AR_MIN})")
     print(f"CG          : {best_x_cg:.4f} m  (aft of root LE,  SM={STATIC_MARGIN*100:.0f}% MAC)")
-    print(f"Params     : Root={best_root:.2f}  Taper={best_taper:.2f} Sweep={best_sweep:.2f}  Twist={best_twist:.2f}  Span={best_span:.2f}")
+    print(f"Params      : Root={best_root:.2f}  Taper={best_taper:.2f} Sweep={best_sweep:.2f}  Twist={best_twist:.2f}  Span={best_span:.2f}")
     print(" ")
     
     stl_path, _ = generate_wing("Optimized_Wing", best_span, best_root, best_taper, best_sweep, 0.0, best_twist, airfoil_file)
@@ -126,7 +127,7 @@ class DeltaWingProblem(ElementwiseProblem):
             )
 
             out["F"] = [-score]
-            g_lift = 6.0 - lift                     # lift must be >= 6 N
+            g_lift = MAX_WEIGHT - lift                     # lift must be >= 6 N
             g_cm   = max(CM_cg - CM_MAX,            # CM must be <= CM_MAX
                          CM_MIN - CM_cg)            # CM must be >= CM_MIN
             g_ar   = AR_MIN - AR                    # AR must be >= AR_MIN
@@ -308,6 +309,9 @@ def aspect_ratio(root_chord, taper, span):
     tip_chord     = root_chord * taper
     planform_area = 0.5 * (root_chord + tip_chord) * span
     return span**2 / planform_area
+
+def stall_speed(cl, sref, w=MAX_WEIGHT, rho=1.225):
+    return np.sqrt((2*w) / (rho*sref*cl))
 
 # AngelScript array helpers
 def iarr(v):
