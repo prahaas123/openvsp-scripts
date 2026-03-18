@@ -1,4 +1,5 @@
 import os
+import csv
 import subprocess
 import pyvista as pv
 import numpy as np
@@ -34,10 +35,19 @@ AR_MIN = 4.0
 AR_MAX = 12.0
 TIP_CHORD_MIN = 0.05
 
+LOG_CSV = "optimization_results.csv"
+LOG_FIELDS = [
+    "run_id",
+    "root_chord", "taper", "sweep", "twist", "span",
+    "LD", "CL", "CD", "CM_cg",
+    "AR", "wetted_area", "lift", "stall_speed", "rbm", "x_cg",
+    "score", "ld_term", "wet_term", "vs_term", "rbm_term",
+]
+
 def main():   
     # Define the algorithm
     algorithm = DE(
-        pop_size=30,
+        pop_size=50,
         variant="DE/rand/1/bin",
         CR=0.9,                  
         F=0.8,                    # This acts as the base mutation weight
@@ -49,58 +59,60 @@ def main():
         cvtol=1e-6,
         ftol=1e-6,
         period=20,
-        n_max_gen=30,
+        n_max_gen=100,
         n_max_evals=100000
     )
     problem = DeltaWingProblem()
 
+    init_log()
     print("Starting Optimization...")
     res = minimize(problem, algorithm, termination, seed=1, save_history=True, verbose=True)
 
     print(f"Optimization finished.")
-    
-    best_root = res.X[0]
-    best_taper = res.X[1]
-    best_sweep = res.X[2]
-    best_twist = res.X[3]
-    best_span = res.X[4]
-    best_score = -res.F[0]
-    
-    # Results Summary
-    best_wetted = estimate_wetted_area(best_root, best_taper, best_span)
-    best_x_cg   = calc_cg(best_root, best_taper, best_span, best_sweep)
-    best_ar     = aspect_ratio(best_root, best_taper, best_span)
 
-    w_ld,  ref_ld  = SCORING["ld_ratio"]
-    w_wet, ref_wet = SCORING["wetted_area"]
-    w_vs,  ref_vs  = SCORING["stall_speed"]
-    w_rbm, ref_rbm = SCORING["bending_moment"]
-    best_sref = 0.5 * (best_root + best_root * best_taper) * best_span
-    CL_approx = MAX_WEIGHT / (0.5 * 1.225 * velocity**2 * best_sref)
-    best_vs   = stall_speed(CL_approx, best_sref)
-    best_rbm  = root_bending_moment(best_root, best_taper, best_span, CL_approx)
+    # Look up values from the log
+    row = lookup_best()
+    if row is None:
+        print("No feasible designs were logged — cannot print results summary.")
+        return
+    best_root   = float(row["root_chord"])
+    best_taper  = float(row["taper"])
+    best_sweep  = float(row["sweep"])
+    best_twist  = float(row["twist"])
+    best_span   = float(row["span"])
+    ld          = float(row["LD"])
+    wetted      = float(row["wetted_area"])
+    vs          = float(row["stall_speed"])
+    rbm         = float(row["rbm"])
+    cm          = float(row["CM_cg"])
+    ar          = float(row["AR"])
+    lift        = float(row["lift"])
+    x_cg        = float(row["x_cg"])
+    score       = float(row["score"])
 
-    penalty = (w_wet * (best_wetted / ref_wet)
-             + w_vs  * (best_vs     / ref_vs)
-             + w_rbm * (best_rbm    / ref_rbm))
-    best_ld = (best_score + penalty) / w_ld * ref_ld
-
-    _, breakdown = compute_score(best_ld, best_wetted, best_vs, best_rbm)
+    _, breakdown = compute_score(ld, wetted, vs, rbm)
 
     print("\n--- OPTIMAL WING GEOMETRY ---")
-    print(f"Score      : {best_score:.4f}  (weighted sum — higher is better)")
+    print(f"Score      : {score:.4f}  (weighted sum — higher is better)")
     print(f"\n--- SCORE BREAKDOWN ---")
     for term, contribution in breakdown.items():
         w, ref = SCORING[term]
         print(f"  {term:<16}: contribution={contribution:+.4f}  (weight={w}, reference={ref})")
+    print(f"\n--- AERODYNAMICS ---")
+    print(f"L/D         : {ld:.4f}")
+    print(f"CL          : {float(row['CL']):.4f}")
+    print(f"CD          : {float(row['CD']):.4f}")
+    print(f"CM_cg       : {cm:.4f}")
+    print(f"Total lift  : {lift:.4f} N")
+    print(f"\n--- GEOMETRY ---")
+    print(f"Wetted area : {wetted:.4f} m²")
+    print(f"Aspect ratio: {ar:.4f}  (min: {AR_MIN}  max: {AR_MAX})")
+    print(f"Stall speed : {vs:.4f} m/s")
+    print(f"Root BM     : {rbm:.4f} N·m")
+    print(f"CG          : {x_cg:.4f} m  (aft of root LE,  SM={STATIC_MARGIN*100:.0f}% MAC)")
     print(f"\n--- PARAMETERS ---")
-    print(f"L/D         : {best_ld:.4f}")
-    print(f"Wetted area : {best_wetted:.4f} m²")
-    print(f"Stall speed : {best_vs:.4f} m/s  (estimate, at cruise CL)")
-    print(f"Root BM     : {best_rbm:.4f} N·m  (estimate, at cruise CL)")
-    print(f"Aspect ratio: {best_ar:.4f}  (min allowed: {AR_MIN})")
-    print(f"CG          : {best_x_cg:.4f} m  (aft of root LE,  SM={STATIC_MARGIN*100:.0f}% MAC)")
-    print(f"Params      : Root={best_root:.2f}  Taper={best_taper:.2f}  Sweep={best_sweep:.2f}  Twist={best_twist:.2f}  Span={best_span:.2f}")
+    print(f"Params      : Root={best_root:.4f}  Taper={best_taper:.4f}  Sweep={best_sweep:.4f}  Twist={best_twist:.4f}  Span={best_span:.4f}")
+    print(f"\nFeasible designs logged to: {LOG_CSV}")
     print(" ")
     
     stl_path, _ = generate_wing("Optimized_Wing", best_span, best_root, best_taper, best_sweep, 0.0, best_twist, airfoil_file)
@@ -150,11 +162,38 @@ class DeltaWingProblem(ElementwiseProblem):
             )
 
             out["F"] = [-score]
-            g_lift = MAX_WEIGHT - lift                      # lift must be >= 6 N
-            g_cm   = max(CM_cg - CM_MAX, CM_MIN - CM_cg)    # Cm must be between CM_MIN and CM_MAX
-            g_ar   = max(AR_MIN - AR, AR - AR_MAX)          # AR must be between AR_MIN and AR_MAX
-            g_tip = TIP_CHORD_MIN - (root_chord * taper)    # Tip chord should be >= TIP_CHORD_MIN
+            g_lift = MAX_WEIGHT - lift
+            g_cm   = max(CM_cg - CM_MAX, CM_MIN - CM_cg)
+            g_ar   = max(AR_MIN - AR, AR - AR_MAX)
+            g_tip  = TIP_CHORD_MIN - (root_chord * taper)
             out["G"] = [g_lift, g_cm, g_ar, g_tip]
+
+            # Only log feasible designs (all constraints satisfied)
+            if g_lift <= 0 and g_cm <= 0 and g_ar <= 0 and g_tip <= 0:
+                x_cg_val = calc_cg(root_chord, taper, span, sweep)
+                append_log({
+                    "run_id"      : run_id,
+                    "root_chord"  : round(float(root_chord),  6),
+                    "taper"       : round(float(taper),       6),
+                    "sweep"       : round(float(sweep),       6),
+                    "twist"       : round(float(twist),       6),
+                    "span"        : round(float(span),        6),
+                    "LD"          : round(LD,                 6),
+                    "CL"          : round(CL,                 6),
+                    "CD"          : round(CD,                 6),
+                    "CM_cg"       : round(CM_cg,              6),
+                    "AR"          : round(AR,                 6),
+                    "wetted_area" : round(wetted_area,        6),
+                    "lift"        : round(lift,               6),
+                    "stall_speed" : round(vs,                 6),
+                    "rbm"         : round(rbm,                6),
+                    "x_cg"        : round(x_cg_val,          6),
+                    "score"       : round(score,              6),
+                    "ld_term"     : round(breakdown["ld_ratio"],       6),
+                    "wet_term"    : round(breakdown["wetted_area"],     6),
+                    "vs_term"     : round(breakdown["stall_speed"],     6),
+                    "rbm_term"    : round(breakdown["bending_moment"],  6),
+                })
 
         except Exception as e:
             print(f"Run {run_id} failed: {e}")
@@ -351,6 +390,22 @@ def root_bending_moment(root_chord, taper, span, CL, vin=velocity, rho=1.225):
     q = 0.5 * rho * vin**2
     s = span / 2.0
     return q * CL * root_chord * s**2 * (1 + 2 * taper) / 6
+
+def init_log():
+    with open(LOG_CSV, "w", newline="") as f:
+        csv.DictWriter(f, fieldnames=LOG_FIELDS).writeheader()
+
+def append_log(row: dict):
+    with open(LOG_CSV, "a", newline="") as f:
+        csv.DictWriter(f, fieldnames=LOG_FIELDS, extrasaction="ignore").writerow(row)
+
+def lookup_best():
+    best = None
+    with open(LOG_CSV, newline="") as f:
+        for row in csv.DictReader(f):
+            if best is None or float(row["score"]) > float(best["score"]):
+                best = row
+    return best
 
 # AngelScript array helpers
 def iarr(v):
