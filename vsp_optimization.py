@@ -19,9 +19,11 @@ alpha = 5 # degrees AoA
 airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
 
 SCORING = {
-    # term_name   : (weight,  reference_value)
-    "ld_ratio"   : (0.7,     15.0),  # typical/target L/D
-    "wetted_area": (0.3,      0.1),  # reference wetted area (m²)
+    # term_name     : (weight,  reference_value)
+    "ld_ratio"      : (0.45,     15.0),  # typical/target L/D
+    "wetted_area"   : (0.2,      0.1),   # reference wetted area (m²)
+    "stall_speed"   : (0.25,    10.0),   # reference stall speed (m/s)
+    "bending_moment": (0.1,     1.5),    # reference RBM (N·m)
 }
 
 MAX_WEIGHT = 6   # Newtons
@@ -29,6 +31,8 @@ STATIC_MARGIN = 0.05
 CM_MIN = -0.08   # lower bound on CM about CG
 CM_MAX =  0.08   # upper bound on CM about CG
 AR_MIN = 4.0
+AR_MAX = 12.0
+TIP_CHORD_MIN = 0.05
 
 def main():   
     # Define the algorithm
@@ -64,26 +68,39 @@ def main():
     
     # Results Summary
     best_wetted = estimate_wetted_area(best_root, best_taper, best_span)
-    w_ld, ref_ld   = SCORING["ld_ratio"]
-    w_wet, ref_wet = SCORING["wetted_area"]
-    best_ld = (best_score + w_wet * (best_wetted / ref_wet)) / w_ld * ref_ld
-    _, breakdown = compute_score(best_ld, best_wetted)
+    best_x_cg   = calc_cg(best_root, best_taper, best_span, best_sweep)
+    best_ar     = aspect_ratio(best_root, best_taper, best_span)
 
-    best_x_cg = calc_cg(best_root, best_taper, best_span, best_sweep)
-    best_ar = aspect_ratio(best_root, best_taper, best_span)
+    w_ld,  ref_ld  = SCORING["ld_ratio"]
+    w_wet, ref_wet = SCORING["wetted_area"]
+    w_vs,  ref_vs  = SCORING["stall_speed"]
+    w_rbm, ref_rbm = SCORING["bending_moment"]
+    best_sref = 0.5 * (best_root + best_root * best_taper) * best_span
+    CL_approx = MAX_WEIGHT / (0.5 * 1.225 * velocity**2 * best_sref)
+    best_vs   = stall_speed(CL_approx, best_sref)
+    best_rbm  = root_bending_moment(best_root, best_taper, best_span, CL_approx)
+
+    penalty = (w_wet * (best_wetted / ref_wet)
+             + w_vs  * (best_vs     / ref_vs)
+             + w_rbm * (best_rbm    / ref_rbm))
+    best_ld = (best_score + penalty) / w_ld * ref_ld
+
+    _, breakdown = compute_score(best_ld, best_wetted, best_vs, best_rbm)
 
     print("\n--- OPTIMAL WING GEOMETRY ---")
     print(f"Score      : {best_score:.4f}  (weighted sum — higher is better)")
     print(f"\n--- SCORE BREAKDOWN ---")
     for term, contribution in breakdown.items():
         w, ref = SCORING[term]
-        print(f"  {term:<14}: contribution={contribution:+.4f}  (weight={w}, reference={ref})")
+        print(f"  {term:<16}: contribution={contribution:+.4f}  (weight={w}, reference={ref})")
     print(f"\n--- PARAMETERS ---")
     print(f"L/D         : {best_ld:.4f}")
     print(f"Wetted area : {best_wetted:.4f} m²")
+    print(f"Stall speed : {best_vs:.4f} m/s  (estimate, at cruise CL)")
+    print(f"Root BM     : {best_rbm:.4f} N·m  (estimate, at cruise CL)")
     print(f"Aspect ratio: {best_ar:.4f}  (min allowed: {AR_MIN})")
     print(f"CG          : {best_x_cg:.4f} m  (aft of root LE,  SM={STATIC_MARGIN*100:.0f}% MAC)")
-    print(f"Params      : Root={best_root:.2f}  Taper={best_taper:.2f} Sweep={best_sweep:.2f}  Twist={best_twist:.2f}  Span={best_span:.2f}")
+    print(f"Params      : Root={best_root:.2f}  Taper={best_taper:.2f}  Sweep={best_sweep:.2f}  Twist={best_twist:.2f}  Span={best_span:.2f}")
     print(" ")
     
     stl_path, _ = generate_wing("Optimized_Wing", best_span, best_root, best_taper, best_sweep, 0.0, best_twist, airfoil_file)
@@ -94,7 +111,7 @@ class DeltaWingProblem(ElementwiseProblem):
         super().__init__(
             n_var=5,             # Number of variables
             n_obj=1,             # Number of objectives
-            n_constr=3,          # Number of constraints
+            n_constr=4,          # Number of constraints
             xl=np.array([0.1, 0.05, 0.0, -15.0, 0.5]), # Lower bounds for variables
             xu=np.array([0.25, 1.0, 60.0, 5.0, 0.9])   # Upper bounds for variables
         )
@@ -112,31 +129,37 @@ class DeltaWingProblem(ElementwiseProblem):
             stl_path, analysis_path = generate_wing(run_id, span, root_chord, taper, sweep, 0.0, twist, airfoil_file)
             Sref = 0.5 * (root_chord + root_chord * taper) * span
             x_cg = calc_cg(root_chord, taper, span, sweep)
-            CL, CD, LD, CM_cg = vsp_point(analysis_path, velocity, alpha, Sref, span, root_chord, x_cg)
-            lift = 0.5 * CL * 1.225 * velocity * velocity * Sref
+            aero  = vsp_point(analysis_path, velocity, alpha, Sref, span, root_chord, x_cg)
+            CL    = aero["CL"]
+            CD    = aero["CD"]
+            LD    = aero["LD"]
+            CM_cg = aero["CM"]
+            lift  = 0.5 * CL * 1.225 * velocity * velocity * Sref
 
-            AR    = aspect_ratio(root_chord, taper, span)
+            AR          = aspect_ratio(root_chord, taper, span)
             wetted_area = estimate_wetted_area(root_chord, taper, span)
-            score, breakdown = compute_score(LD, wetted_area)
+            vs          = stall_speed(CL, Sref)
+            rbm         = root_bending_moment(root_chord, taper, span, CL)
+            score, breakdown = compute_score(LD, wetted_area, vs, rbm)
 
             print(
                 f"  [{run_id}] L/D={LD:.3f}  wetted={wetted_area:.4f} m²  "
-                f"CM_cg={CM_cg:.4f}  AR={AR:.2f}  "
+                f"CM_cg={CM_cg:.4f}  AR={AR:.2f}  Vs={vs:.2f} m/s  RBM={rbm:.3f} N·m  "
                 + "  ".join(f"{k}={v:+.4f}" for k, v in breakdown.items())
                 + f"  → score={score:.4f}"
             )
 
             out["F"] = [-score]
-            g_lift = MAX_WEIGHT - lift                     # lift must be >= 6 N
-            g_cm   = max(CM_cg - CM_MAX,            # CM must be <= CM_MAX
-                         CM_MIN - CM_cg)            # CM must be >= CM_MIN
-            g_ar   = AR_MIN - AR                    # AR must be >= AR_MIN
-            out["G"] = [g_lift, g_cm, g_ar]
+            g_lift = MAX_WEIGHT - lift                      # lift must be >= 6 N
+            g_cm   = max(CM_cg - CM_MAX, CM_MIN - CM_cg)    # Cm must be between CM_MIN and CM_MAX
+            g_ar   = max(AR_MIN - AR, AR - AR_MAX)          # AR must be between AR_MIN and AR_MAX
+            g_tip = TIP_CHORD_MIN - (root_chord * taper)    # Tip chord should be >= TIP_CHORD_MIN
+            out["G"] = [g_lift, g_cm, g_ar, g_tip]
 
         except Exception as e:
             print(f"Run {run_id} failed: {e}")
             out["F"] = [1e10]
-            out["G"] = [1e10, 1e10, 1e10]
+            out["G"] = [1e10, 1e10, 1e10, 1e10]
         finally:
             for filename in glob.glob(f"{run_id}*"):
                 try:
@@ -247,10 +270,15 @@ def vsp_point(vsp3_path, vin, alpha, Sref, bref, cref, x_cg):
 
     polar_file = vsp3_path.replace(".vsp3", ".polar")
     CL, CD, Cm = parse_polar(polar_file)
-    cl   = CL[0]
-    cd   = CD[0]
-    cm   = Cm[0]   # pitching moment about VSP reference point
-    return cl, cd, cl / cd, cm
+    cl = CL[0]
+    cd = CD[0]
+    cm = Cm[0]
+    return {
+        "CL": cl,
+        "CD": cd,
+        "LD": cl / cd,
+        "CM": cm,
+    }
 
 def parse_polar(polar_path):
     CL, CD, Cm = [], [], []
@@ -278,18 +306,24 @@ def parse_polar(polar_path):
  
     return CL, CD, Cm
 
-def compute_score(ld, wetted_area):
+def compute_score(ld, wetted_area, stall_spd, rbm):
     w_ld,  ref_ld  = SCORING["ld_ratio"]
     w_wet, ref_wet = SCORING["wetted_area"]
- 
-    term_ld  =  w_ld  * (ld / ref_ld)   # positive: reward high L/D
+    w_vs,  ref_vs  = SCORING["stall_speed"]
+    w_rbm, ref_rbm = SCORING["bending_moment"]
+
+    term_ld  =  w_ld  * (ld         / ref_ld)   # positive: reward high L/D
     term_wet = -w_wet * (wetted_area / ref_wet)  # negative: penalise large area
- 
-    score = term_ld + term_wet
- 
+    term_vs  = -w_vs  * (stall_spd  / ref_vs)   # negative: penalise high stall speed
+    term_rbm = -w_rbm * (rbm        / ref_rbm)  # negative: penalise high bending moment
+
+    score = term_ld + term_wet + term_vs + term_rbm
+
     breakdown = {
-        "ld_ratio"   : term_ld,
-        "wetted_area": term_wet,
+        "ld_ratio"      : term_ld,
+        "wetted_area"   : term_wet,
+        "stall_speed"   : term_vs,
+        "bending_moment": term_rbm,
     }
     return score, breakdown
 
@@ -312,6 +346,11 @@ def aspect_ratio(root_chord, taper, span):
 
 def stall_speed(cl, sref, w=MAX_WEIGHT, rho=1.225):
     return np.sqrt((2*w) / (rho*sref*cl))
+
+def root_bending_moment(root_chord, taper, span, CL, vin=velocity, rho=1.225):
+    q = 0.5 * rho * vin**2
+    s = span / 2.0
+    return q * CL * root_chord * s**2 * (1 + 2 * taper) / 6
 
 # AngelScript array helpers
 def iarr(v):
