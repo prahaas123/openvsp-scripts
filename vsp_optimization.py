@@ -22,12 +22,12 @@ airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils
 SCORING = {
     # term_name     : (weight,  reference_value)
     "ld_ratio"      : (0.45,     15.0),  # typical/target L/D
-    "wetted_area"   : (0.2,      0.1),   # reference wetted area (m²)
-    "stall_speed"   : (0.25,    10.0),   # reference stall speed (m/s)
+    "wetted_area"   : (0.2,      0.2),   # reference wetted area (m²)
+    "stall_speed"   : (0.25,    12.0),   # reference stall speed (m/s)
     "bending_moment": (0.1,     1.5),    # reference RBM (N·m)
 }
 
-MAX_WEIGHT = 6   # Newtons
+MAX_WEIGHT = 4   # Newtons
 STATIC_MARGIN = 0.05
 CM_MIN = -0.08   # lower bound on CM about CG
 CM_MAX =  0.08   # upper bound on CM about CG
@@ -59,7 +59,7 @@ def main():
         cvtol=1e-6,
         ftol=1e-6,
         period=20,
-        n_max_gen=100,
+        n_max_gen=30,
         n_max_evals=100000
     )
     problem = DeltaWingProblem()
@@ -115,7 +115,7 @@ def main():
     print(f"\nFeasible designs logged to: {LOG_CSV}")
     print(" ")
     
-    stl_path, _ = generate_wing("Optimized_Wing", best_span, best_root, best_taper, best_sweep, 0.0, best_twist, airfoil_file)
+    stl_path, _ = generate_wing("Optimized_Wing", best_span * 1000, best_root * 1000, best_taper, best_sweep, 0.0, best_twist, airfoil_file)
     visualize_stl(stl_path)
         
 class DeltaWingProblem(ElementwiseProblem):
@@ -124,8 +124,8 @@ class DeltaWingProblem(ElementwiseProblem):
             n_var=5,             # Number of variables
             n_obj=1,             # Number of objectives
             n_constr=4,          # Number of constraints
-            xl=np.array([0.1, 0.05, 0.0, -15.0, 0.5]), # Lower bounds for variables
-            xu=np.array([0.25, 1.0, 60.0, 5.0, 0.9])   # Upper bounds for variables
+            xl=np.array([0.15, 0.05, 0.0, -10.0, 0.5]),  # Lower bounds for variables
+            xu=np.array([0.25, 1.0, 35.0, 5.0, 0.9])   # Upper bounds for variables
         )
 
     def _evaluate(self, x, out, *args, **kwargs):
@@ -415,4 +415,6 @@ def darr(v):
     return f"array<double> = {{{v}}}"
 
 if __name__ == "__main__":
-    main()
+    # main()
+    generate_wing("TestCut", 900, 150, 0.334, 34.171684, 0, -9.016269, airfoil_file)
+    visualize_stl("TestCut.stl")
