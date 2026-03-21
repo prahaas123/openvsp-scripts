@@ -18,7 +18,7 @@ e = 0.8 # Oswald efficiency factor
 K = 1 / (np.pi * e * AR) # Induced drag factor
 
 # Wing Loading Array
-W_S = np.linspace(10, 125, 500)
+W_S = np.linspace(0, 125, 500)
 
 # Constraint Equations
 WS_landing_max = k_L * 1.0 * C_Lmax * s_land * g # Landing Constraint
@@ -35,12 +35,12 @@ valid_WS = W_S[W_S <= WS_landing_max]
 valid_TW_takeoff = TW_takeoff[W_S <= WS_landing_max]
 valid_TW_cruise = TW_cruise[W_S <= WS_landing_max]
 bottom_boundary = np.maximum(valid_TW_takeoff, valid_TW_cruise)
-plt.fill_between(valid_WS, bottom_boundary, 1.0, color='green', alpha=0.2, label='Feasible Design Space')
+plt.fill_between(valid_WS, bottom_boundary, 2.0, color='green', alpha=0.2, label='Feasible Design Space')
 
 plt.title('Constraint Analysis Diagram (T/W vs W/S)', fontsize=14, fontweight='bold')
 plt.xlabel('Wing Loading, W/S (N/m²)', fontsize=12)
 plt.ylabel('Thrust-to-Weight Ratio, T/W', fontsize=12)
-plt.ylim(0, 1.0)
+plt.ylim(0, 2.0)
 plt.xlim(0, max(W_S))
 plt.grid(True, linestyle=':', alpha=0.7)
 plt.legend(loc='upper left', framealpha=1)
