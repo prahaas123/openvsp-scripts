@@ -18,7 +18,7 @@ e = 0.8 # Oswald efficiency factor
 K = 1 / (np.pi * e * AR) # Induced drag factor
 
 # Wing Loading Array
-W_S = np.linspace(0, 125, 500)
+W_S = np.linspace(1, 125, 500)
 
 # Constraint Equations
 WS_landing_max = k_L * 1.0 * C_Lmax * s_land * g # Landing Constraint
