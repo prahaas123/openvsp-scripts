@@ -415,6 +415,4 @@ def darr(v):
     return f"array<double> = {{{v}}}"
 
 if __name__ == "__main__":
-    # main()
-    generate_wing("TestCut", 900, 150, 0.334, 34.171684, 0, -9.016269, airfoil_file)
-    visualize_stl("TestCut.stl")
+    main()
