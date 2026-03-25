@@ -12,26 +12,26 @@ wing_chord_res = 50
 velocity = 10 # m/s
 alpha = 0 # degrees AoA
  
-airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\naca4415.dat"
+airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\s1223.dat"
  
 moment_tolerance = 0.05
 tail_sizing_iterations = 10
  
 wing_params = {
-    "span": 1.3,          # [m]
-    "root_chord": 0.15,   # [m]
-    "taper": 0.7,         # [Ratio]
-    "sweep": 5.0,         # [deg] Leading Edge Sweep
+    "span": 1.0,          # [m]
+    "root_chord": 0.23,   # [m]
+    "taper": 1.0,         # [Ratio]
+    "sweep": 0.0,         # [deg] Leading Edge Sweep
     "dihedral": 0.0,      # [deg]
     "twist": 0.0,         # [deg] Washout at tip
-    "alpha": 2.5          # [deg]
+    "alpha": 5.0          # [deg]
 }
  
 htail_params = {
-    "V_H": 0.15,           # Horizontal Tail Volume Coefficient (Typical: 0.4 - 0.6)
-    "l_H": 0.65,          # [m] Tail Moment Arm (Distance from CG to Tail LE)
+    "V_H": 0.10,           # Horizontal Tail Volume Coefficient (Typical: 0.4 - 0.6)
+    "l_H": 0.38,          # [m] Tail Moment Arm (Distance from CG to Tail LE)
     "airfoil": "0012",
-    "aspect_ratio": 6.0
+    "aspect_ratio": 4.0
 }
  
 vtail_params = {
