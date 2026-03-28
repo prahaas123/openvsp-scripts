@@ -5,10 +5,7 @@ import pyvista as pv
 import numpy as np
 import glob
 import uuid
-from pymoo.algorithms.soo.nonconvex.de import DE
-from pymoo.core.problem import ElementwiseProblem
-from pymoo.optimize import minimize
-from pymoo.termination.default import DefaultSingleObjectiveTermination
+from scipy.optimize import differential_evolution, NonlinearConstraint
 
 vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
@@ -23,8 +20,8 @@ MAX_WEIGHT = 5   # Newtons
 MIN_S_REF = 0.13  # m2
 MAX_S_REF = 0.21  # m2
 STATIC_MARGIN = 0.05
-CM_MIN = -0.08   # lower bound on CM about CG
-CM_MAX =  0.08   # upper bound on CM about CG
+CM_MIN = -0.15   # lower bound on CM about CG
+CM_MAX =  0.15   # upper bound on CM about CG
 AR_MIN = 3.0
 AR_MAX = 6.0
 TIP_CHORD_MIN = 0.05
@@ -34,40 +31,51 @@ LOG_FIELDS = [
     "run_id",
     "root_chord", "taper", "sweep", "twist", "span",
     "LD", "CL", "CD", "CM_cg",
-    "AR", "wetted_area", "lift", "x_cg"
+    "AR", "lift", "x_cg"
 ]
 
 def main():   
-    # Define the algorithm
-    algorithm = DE(
-        pop_size=30,
-        variant="DE/rand/1/bin",
-        CR=0.9,                  
-        F=0.8,                    # This acts as the base mutation weight
-        dither="vector",
-        jitter=False
-    )
-    termination = DefaultSingleObjectiveTermination(
-        xtol=1e-8,
-        cvtol=1e-6,
-        ftol=1e-6,
-        period=20,
-        n_max_gen=30,
-        n_max_evals=100000
-    )
-    problem = DeltaWingProblem()
-
     init_log()
-    print("Starting Optimization...")
-    res = minimize(problem, algorithm, termination, seed=1, save_history=True, verbose=True)
+    print("Starting SciPy DE Optimization...")
+    bounds = [(0.2, 0.4),   # Root chord
+              (0.1, 0.8),   # Taper ratio
+              (20.0, 50.0), # Sweep angle
+              (-10.0, 0.0), # Washout angle
+              (0.4, 0.9)]   # Wingspan
 
-    print(f"Optimization finished.")
+    # Early-rejection geometric constraints
+    geom_constraint = NonlinearConstraint(
+        evaluate_geometry, 
+        lb=[MIN_S_REF, AR_MIN, TIP_CHORD_MIN], 
+        ub=[MAX_S_REF, AR_MAX, np.inf]
+    )
 
-    # Look up values from the log
+    # Run SciPy DE
+    try:
+        result = differential_evolution(
+            evaluate_aero_objective,
+            bounds=bounds,
+            constraints=(geom_constraint,),
+            strategy='rand1bin',
+            recombination=0.9,
+            mutation=(0.5, 1.0),
+            popsize=6,               # Population members = popsize * parameters 
+            maxiter=30,              # n_max_gen
+            tol=1e-6,                # ftol
+            seed=1,
+            disp=True
+        )
+        print(f"\nOptimization finished.")
+    except KeyboardInterrupt:
+        # This catches the Ctrl+C
+        print("\n\nOptimization interrupted by user! Generating results from the best logged design so far...")
+
+    # Look up values from the log (safest way to get the best strictly feasible run)
     row = lookup_best()
     if row is None:
         print("No feasible designs were logged — cannot print results summary.")
         return
+        
     best_root   = float(row["root_chord"])
     best_taper  = float(row["taper"])
     best_sweep  = float(row["sweep"])
@@ -91,82 +99,73 @@ def main():
     print(f"CG          : {x_cg:.4f} m  (aft of root LE,  SM={STATIC_MARGIN*100:.0f}% MAC)")
     print(f"\n--- PARAMETERS ---")
     print(f"Params      : Root={best_root:.4f}  Taper={best_taper:.4f}  Sweep={best_sweep:.4f}  Twist={best_twist:.4f}  Span={best_span:.4f}")
-    print(f"\nFeasible designs logged to: {LOG_CSV}")
-    print(" ")
+    print(f"\nFeasible designs logged to: {LOG_CSV}\n")
     
+    # Generate STL
     stl_path, _ = generate_wing("Optimized_Wing", best_span * 1000, best_root * 1000, best_taper, best_sweep, 0.0, best_twist, airfoil_file)
     visualize_stl(stl_path)
+    
+def evaluate_geometry(x):
+    root_chord, taper, sweep, twist, span = x
+    Sref = 0.5 * (root_chord + root_chord * taper) * span
+    AR = aspect_ratio(root_chord, taper, span)
+    tip_chord = root_chord * taper
+    return np.array([Sref, AR, tip_chord])
+
+def evaluate_aero_objective(x):
+    root_chord, taper, sweep, twist, span = x
+    run_id = f"wing_{uuid.uuid4().hex[:8]}" 
+    
+    try:
+        stl_path, analysis_path = generate_wing(run_id, span, root_chord, taper, sweep, 0.0, twist, airfoil_file)
+        Sref = 0.5 * (root_chord + root_chord * taper) * span
+        x_cg = calc_cg(root_chord, taper, span, sweep)
+        aero  = vsp_point(analysis_path, velocity, alpha, Sref, span, root_chord, x_cg)
+        CL, CD, LD, CM_cg = aero["CL"], aero["CD"], aero["LD"], aero["CM"]
+        lift  = 0.5 * CL * 1.225 * velocity**2 * Sref
+        AR    = aspect_ratio(root_chord, taper, span)
         
-class DeltaWingProblem(ElementwiseProblem):
-    def __init__(self):
-        super().__init__(
-            n_var=5,             # Number of variables
-            n_obj=1,             # Number of objectives
-            n_constr=5,          # Number of constraints
-            xl=np.array([0.2, 0.1, 20.0, -10.0, 0.4]),  # Lower bounds for variables
-            xu=np.array([0.3, 0.8, 50.0, 0.0, 0.8])   # Upper bounds for variables
-        )
+        # Check Aerodynamic Constraints
+        penalty = 0
+        is_feasible = True
+        if lift < MAX_WEIGHT:
+            penalty += 1e5 * (MAX_WEIGHT - lift) # Scale penalty by how badly it failed
+            is_feasible = False
+        if CM_cg < CM_MIN or CM_cg > CM_MAX:
+            penalty += 1e5
+            is_feasible = False
 
-    def _evaluate(self, x, out, *args, **kwargs):
-        root_chord = x[0]
-        taper      = x[1]
-        sweep      = x[2]
-        twist      = x[3]
-        span       = x[4]
+        if is_feasible:
+            print(f"  [{run_id}] FEASIBLE! L/D={LD:.3f}")
+            append_log({
+                "run_id"      : run_id,
+                "root_chord"  : round(float(root_chord),  6),
+                "taper"       : round(float(taper),       6),
+                "sweep"       : round(float(sweep),       6),
+                "twist"       : round(float(twist),       6),
+                "span"        : round(float(span),        6),
+                "LD"          : round(LD,                 6),
+                "CL"          : round(CL,                 6),
+                "CD"          : round(CD,                 6),
+                "CM_cg"       : round(CM_cg,              6),
+                "AR"          : round(AR,                 6),
+                "lift"        : round(lift,               6),
+                "x_cg"        : round(x_cg,               6),
+            })
+        else:
+            print(f"  [{run_id}] Failed Aero Constraints. Lift={lift:.2f}N, CM={CM_cg:.3f}")
 
-        run_id = f"wing_{uuid.uuid4().hex[:8]}" 
-        
-        try:
-            stl_path, analysis_path = generate_wing(run_id, span, root_chord, taper, sweep, 0.0, twist, airfoil_file)
-            Sref = 0.5 * (root_chord + root_chord * taper) * span
-            x_cg = calc_cg(root_chord, taper, span, sweep)
-            aero  = vsp_point(analysis_path, velocity, alpha, Sref, span, root_chord, x_cg)
-            CL    = aero["CL"]
-            CD    = aero["CD"]
-            LD    = aero["LD"]
-            CM_cg = aero["CM"]
-            lift  = 0.5 * CL * 1.225 * velocity * velocity * Sref
-            AR    = aspect_ratio(root_chord, taper, span)
-            
-            print(f"  [{run_id}] L/D={LD:.3f}")
+        return -LD + penalty
 
-            out["F"] = [-LD]
-            g_lift = MAX_WEIGHT - lift
-            g_cm   = max(CM_cg - CM_MAX, CM_MIN - CM_cg)
-            g_ar   = max(AR_MIN - AR, AR - AR_MAX)
-            g_tip  = TIP_CHORD_MIN - (root_chord * taper)
-            g_s_ref = max(Sref - MAX_S_REF, MIN_S_REF - Sref)
-            out["G"] = [g_lift, g_cm, g_ar, g_tip, g_s_ref]
-
-            # Only log feasible designs (all constraints satisfied)
-            if all(g <= 0 for g in out["G"]):
-                x_cg_val = calc_cg(root_chord, taper, span, sweep)
-                append_log({
-                    "run_id"      : run_id,
-                    "root_chord"  : round(float(root_chord),  6),
-                    "taper"       : round(float(taper),       6),
-                    "sweep"       : round(float(sweep),       6),
-                    "twist"       : round(float(twist),       6),
-                    "span"        : round(float(span),        6),
-                    "LD"          : round(LD,                 6),
-                    "CL"          : round(CL,                 6),
-                    "CD"          : round(CD,                 6),
-                    "CM_cg"       : round(CM_cg,              6),
-                    "AR"          : round(AR,                 6),
-                    "lift"        : round(lift,               6),
-                    "x_cg"        : round(x_cg_val,           6),
-                })
-
-        except Exception as e:
-            print(f"Run {run_id} failed: {e}")
-            out["F"] = [1e10]
-            out["G"] = [1e10, 1e10, 1e10, 1e10, 1e10]
-        finally:
-            for filename in glob.glob(f"{run_id}*"):
-                try:
-                    os.remove(filename)
-                except OSError:
-                    pass
+    except Exception as e:
+        print(f"Run {run_id} failed: {e}")
+        return 1e10 # Massive penalty for crashed runs
+    finally:
+        for filename in glob.glob(f"{run_id}*"):
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
 
 def generate_wing(wing_name, wingspan, root_chord, taper_ratio, sweep_angle, dihedral_angle, twist_angle, airfoil_file):
     tip_chord = root_chord * taper_ratio
@@ -257,6 +256,7 @@ def vsp_point(vsp3_path, vin, alpha, Sref, bref, cref, x_cg):
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "WakeNumIter",    {iarr(15)}, 0 );',
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "NCPU",           {iarr(8)}, 0 );',
         f'    Print( "--- Running Aero Point ---" );',
+        f'    SetStringAnalysisInput( "VSPAEROSweep", "RedirectFile", array<string> = {{"{vsp3_path}_log.txt"}}, 0 );'
         f'    ExecAnalysis( "VSPAEROSweep" );',
         "}",
     ]
