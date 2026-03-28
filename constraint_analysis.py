@@ -2,23 +2,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Design Requirements
-V_cruise = 20.0          # Target cruise velocity (m/s)
-s_to = 10.0              # Maximum allowable takeoff ground roll (m)
-s_land = 30.0            # Maximum allowable landing ground roll (m)
+V_cruise = 10.0          # Target cruise velocity (m/s)
+s_to = 5.0               # Maximum allowable takeoff ground roll (m)
+s_land = 10.0            # Maximum allowable landing ground roll (m)
 k_L = 0.255              # Landing constant (kg/m^3)
 
 # Parameters
 g = 9.81
 rho = 1.225
-mu = 0.3 # Rolling friction coefficient
+mu = 0.0 # Rolling friction coefficient
 C_Lmax = 1.5
-C_D0 = 0.02 # Parastic drag coefficient
-AR = 6.0
+C_D0 = 0.005 # Parastic drag coefficient
+AR = 5.0
 e = 0.8 # Oswald efficiency factor
 K = 1 / (np.pi * e * AR) # Induced drag factor
 
 # Wing Loading Array
-W_S = np.linspace(1, 125, 500)
+W_S = np.linspace(1, 100, 500)
 
 # Constraint Equations
 WS_landing_max = k_L * 1.0 * C_Lmax * s_land * g # Landing Constraint

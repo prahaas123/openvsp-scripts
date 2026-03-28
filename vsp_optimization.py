@@ -14,25 +14,19 @@ vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 20
 wing_chord_res = 50
-velocity = 20 # m/s
-alpha = 5 # degrees AoA
+velocity = 10 # m/s
+alpha = 3 # degrees AoA
 
 airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
 
-SCORING = {
-    # term_name     : (weight,  reference_value)
-    "ld_ratio"      : (0.45,     15.0),  # typical/target L/D
-    "wetted_area"   : (0.2,      0.2),   # reference wetted area (m²)
-    "stall_speed"   : (0.25,    12.0),   # reference stall speed (m/s)
-    "bending_moment": (0.1,     1.5),    # reference RBM (N·m)
-}
-
-MAX_WEIGHT = 4   # Newtons
+MAX_WEIGHT = 5   # Newtons
+MIN_S_REF = 0.13  # m2
+MAX_S_REF = 0.21  # m2
 STATIC_MARGIN = 0.05
 CM_MIN = -0.08   # lower bound on CM about CG
 CM_MAX =  0.08   # upper bound on CM about CG
-AR_MIN = 4.0
-AR_MAX = 12.0
+AR_MIN = 3.0
+AR_MAX = 6.0
 TIP_CHORD_MIN = 0.05
 
 LOG_CSV = "optimization_results.csv"
@@ -40,14 +34,13 @@ LOG_FIELDS = [
     "run_id",
     "root_chord", "taper", "sweep", "twist", "span",
     "LD", "CL", "CD", "CM_cg",
-    "AR", "wetted_area", "lift", "stall_speed", "rbm", "x_cg",
-    "score", "ld_term", "wet_term", "vs_term", "rbm_term",
+    "AR", "wetted_area", "lift", "x_cg"
 ]
 
 def main():   
     # Define the algorithm
     algorithm = DE(
-        pop_size=50,
+        pop_size=30,
         variant="DE/rand/1/bin",
         CR=0.9,                  
         F=0.8,                    # This acts as the base mutation weight
@@ -81,23 +74,12 @@ def main():
     best_twist  = float(row["twist"])
     best_span   = float(row["span"])
     ld          = float(row["LD"])
-    wetted      = float(row["wetted_area"])
-    vs          = float(row["stall_speed"])
-    rbm         = float(row["rbm"])
     cm          = float(row["CM_cg"])
     ar          = float(row["AR"])
     lift        = float(row["lift"])
     x_cg        = float(row["x_cg"])
-    score       = float(row["score"])
-
-    _, breakdown = compute_score(ld, wetted, vs, rbm)
 
     print("\n--- OPTIMAL WING GEOMETRY ---")
-    print(f"Score      : {score:.4f}  (weighted sum — higher is better)")
-    print(f"\n--- SCORE BREAKDOWN ---")
-    for term, contribution in breakdown.items():
-        w, ref = SCORING[term]
-        print(f"  {term:<16}: contribution={contribution:+.4f}  (weight={w}, reference={ref})")
     print(f"\n--- AERODYNAMICS ---")
     print(f"L/D         : {ld:.4f}")
     print(f"CL          : {float(row['CL']):.4f}")
@@ -105,10 +87,7 @@ def main():
     print(f"CM_cg       : {cm:.4f}")
     print(f"Total lift  : {lift:.4f} N")
     print(f"\n--- GEOMETRY ---")
-    print(f"Wetted area : {wetted:.4f} m²")
     print(f"Aspect ratio: {ar:.4f}  (min: {AR_MIN}  max: {AR_MAX})")
-    print(f"Stall speed : {vs:.4f} m/s")
-    print(f"Root BM     : {rbm:.4f} N·m")
     print(f"CG          : {x_cg:.4f} m  (aft of root LE,  SM={STATIC_MARGIN*100:.0f}% MAC)")
     print(f"\n--- PARAMETERS ---")
     print(f"Params      : Root={best_root:.4f}  Taper={best_taper:.4f}  Sweep={best_sweep:.4f}  Twist={best_twist:.4f}  Span={best_span:.4f}")
@@ -123,9 +102,9 @@ class DeltaWingProblem(ElementwiseProblem):
         super().__init__(
             n_var=5,             # Number of variables
             n_obj=1,             # Number of objectives
-            n_constr=4,          # Number of constraints
-            xl=np.array([0.15, 0.05, 0.0, -10.0, 0.5]),  # Lower bounds for variables
-            xu=np.array([0.25, 1.0, 35.0, 5.0, 0.9])   # Upper bounds for variables
+            n_constr=5,          # Number of constraints
+            xl=np.array([0.2, 0.1, 20.0, -10.0, 0.4]),  # Lower bounds for variables
+            xu=np.array([0.3, 0.8, 50.0, 0.0, 0.8])   # Upper bounds for variables
         )
 
     def _evaluate(self, x, out, *args, **kwargs):
@@ -147,29 +126,20 @@ class DeltaWingProblem(ElementwiseProblem):
             LD    = aero["LD"]
             CM_cg = aero["CM"]
             lift  = 0.5 * CL * 1.225 * velocity * velocity * Sref
+            AR    = aspect_ratio(root_chord, taper, span)
+            
+            print(f"  [{run_id}] L/D={LD:.3f}")
 
-            AR          = aspect_ratio(root_chord, taper, span)
-            wetted_area = estimate_wetted_area(root_chord, taper, span)
-            vs          = stall_speed(CL, Sref)
-            rbm         = root_bending_moment(root_chord, taper, span, CL)
-            score, breakdown = compute_score(LD, wetted_area, vs, rbm)
-
-            print(
-                f"  [{run_id}] L/D={LD:.3f}  wetted={wetted_area:.4f} m²  "
-                f"CM_cg={CM_cg:.4f}  AR={AR:.2f}  Vs={vs:.2f} m/s  RBM={rbm:.3f} N·m  "
-                + "  ".join(f"{k}={v:+.4f}" for k, v in breakdown.items())
-                + f"  → score={score:.4f}"
-            )
-
-            out["F"] = [-score]
+            out["F"] = [-LD]
             g_lift = MAX_WEIGHT - lift
             g_cm   = max(CM_cg - CM_MAX, CM_MIN - CM_cg)
             g_ar   = max(AR_MIN - AR, AR - AR_MAX)
             g_tip  = TIP_CHORD_MIN - (root_chord * taper)
-            out["G"] = [g_lift, g_cm, g_ar, g_tip]
+            g_s_ref = max(Sref - MAX_S_REF, MIN_S_REF - Sref)
+            out["G"] = [g_lift, g_cm, g_ar, g_tip, g_s_ref]
 
             # Only log feasible designs (all constraints satisfied)
-            if g_lift <= 0 and g_cm <= 0 and g_ar <= 0 and g_tip <= 0:
+            if all(g <= 0 for g in out["G"]):
                 x_cg_val = calc_cg(root_chord, taper, span, sweep)
                 append_log({
                     "run_id"      : run_id,
@@ -183,22 +153,14 @@ class DeltaWingProblem(ElementwiseProblem):
                     "CD"          : round(CD,                 6),
                     "CM_cg"       : round(CM_cg,              6),
                     "AR"          : round(AR,                 6),
-                    "wetted_area" : round(wetted_area,        6),
                     "lift"        : round(lift,               6),
-                    "stall_speed" : round(vs,                 6),
-                    "rbm"         : round(rbm,                6),
-                    "x_cg"        : round(x_cg_val,          6),
-                    "score"       : round(score,              6),
-                    "ld_term"     : round(breakdown["ld_ratio"],       6),
-                    "wet_term"    : round(breakdown["wetted_area"],     6),
-                    "vs_term"     : round(breakdown["stall_speed"],     6),
-                    "rbm_term"    : round(breakdown["bending_moment"],  6),
+                    "x_cg"        : round(x_cg_val,           6),
                 })
 
         except Exception as e:
             print(f"Run {run_id} failed: {e}")
             out["F"] = [1e10]
-            out["G"] = [1e10, 1e10, 1e10, 1e10]
+            out["G"] = [1e10, 1e10, 1e10, 1e10, 1e10]
         finally:
             for filename in glob.glob(f"{run_id}*"):
                 try:
@@ -345,27 +307,6 @@ def parse_polar(polar_path):
  
     return CL, CD, Cm
 
-def compute_score(ld, wetted_area, stall_spd, rbm):
-    w_ld,  ref_ld  = SCORING["ld_ratio"]
-    w_wet, ref_wet = SCORING["wetted_area"]
-    w_vs,  ref_vs  = SCORING["stall_speed"]
-    w_rbm, ref_rbm = SCORING["bending_moment"]
-
-    term_ld  =  w_ld  * (ld         / ref_ld)   # positive: reward high L/D
-    term_wet = -w_wet * (wetted_area / ref_wet)  # negative: penalise large area
-    term_vs  = -w_vs  * (stall_spd  / ref_vs)   # negative: penalise high stall speed
-    term_rbm = -w_rbm * (rbm        / ref_rbm)  # negative: penalise high bending moment
-
-    score = term_ld + term_wet + term_vs + term_rbm
-
-    breakdown = {
-        "ld_ratio"      : term_ld,
-        "wetted_area"   : term_wet,
-        "stall_speed"   : term_vs,
-        "bending_moment": term_rbm,
-    }
-    return score, breakdown
-
 def estimate_wetted_area(root_chord, taper, span):
     tip_chord     = root_chord * taper
     planform_area = 0.5 * (root_chord + tip_chord) * span
@@ -403,7 +344,7 @@ def lookup_best():
     best = None
     with open(LOG_CSV, newline="") as f:
         for row in csv.DictReader(f):
-            if best is None or float(row["score"]) > float(best["score"]):
+            if best is None or float(row["LD"]) > float(best["LD"]):
                 best = row
     return best
 
