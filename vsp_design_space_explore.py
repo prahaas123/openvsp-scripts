@@ -28,7 +28,7 @@ bounds = {
     "span":       (0.5, 2.0)        # meters
 }
 
-num_mc_samples = 200
+num_mc_samples = 500
 
 def main():
     total_sims = num_mc_samples
