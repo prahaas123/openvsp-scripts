@@ -1,7 +1,7 @@
-# Ignore airfoils folder
 Airfoils/
 *.dat
 *.csv
+*.vspscript
 plane*
 wing*
 Optimized_Wing*
