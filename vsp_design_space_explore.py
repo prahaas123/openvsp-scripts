@@ -21,11 +21,11 @@ alpha = 5 # degrees AoA
 airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
 
 bounds = {
-    "root_chord": (0.5, 2.0),     # meters
-    "taper":      (0.1, 0.4),     # ratio
-    "sweep":      (40.0, 70.0),   # degrees
-    "twist":      (-10.0, 0.0),   # degrees
-    "span":       (0.5, 2.0)      # meters
+    "wing_area":  (0.13, 0.21),     # meters^2
+    "taper":      (0.1, 1.0),       # ratio
+    "sweep":      (10.0, 70.0),     # degrees
+    "twist":      (-10.0, 0.0),     # degrees
+    "span":       (0.5, 2.0)        # meters
 }
 
 num_mc_samples = 3500
@@ -40,11 +40,12 @@ def main():
     results = []
 
     for i in tqdm(range(total_sims)):
-        r_c  = np.random.uniform(*bounds["root_chord"])
+        s  = np.random.uniform(*bounds["wing_area"])
         tap  = np.random.uniform(*bounds["taper"])
         swe  = np.random.uniform(*bounds["sweep"])
         twi  = np.random.uniform(*bounds["twist"])
         wing = np.random.uniform(*bounds["span"])
+        r_c = (2 * s) / (wing * (1 + tap))
         
         point = (r_c, tap, swe, twi, wing)
         run_id = f"wing_{uuid.uuid4().hex[:8]}"
