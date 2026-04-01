@@ -14,7 +14,7 @@ wing_chord_res = 50
 velocity = 10 # m/s
 alpha = 3 # degrees AoA
 
-airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
+airfoil_file = r"/home/prahaas123/openvsp_scripts/Airfoils/naca4415.dat"
 
 MAX_WEIGHT = 5   # Newtons
 MIN_S_REF = 0.13  # m2
