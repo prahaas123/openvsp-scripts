@@ -1,3 +1,5 @@
+Airfoils/
+*.dat
 *.csv
 *.vspscript
 plane*
