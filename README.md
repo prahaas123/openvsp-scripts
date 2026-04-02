@@ -65,9 +65,9 @@ Runs a full aero + stability analysis on a conventional aircraft configuration (
 
 ---
 
-### `scoring_sensititivity.py`
+### `constraint_analysis.py`
 
-Sensitivity analysis script — evaluates how changes in individual design parameters affect a scoring metric.
+Generates an aircraft constraint diagram by evaluating the required Thrust-to-Weight ratio (T/W) against Wing Loading (W/S). It calculates and visualizes the performance boundaries for takeoff, cruise, and landing requirements, ultimately shading the feasible design space for initial aircraft sizing.
 
 ---
 
