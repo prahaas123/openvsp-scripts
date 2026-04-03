@@ -8,6 +8,7 @@ vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 20
 wing_chord_res = 50
+velocity = 20.0 # m/s (for stability sweep)
 speeds = list(range(5, 45, 5)) # m/s
 alphas = list(range(-5, 15)) # degrees AoA
 
