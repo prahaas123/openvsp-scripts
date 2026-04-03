@@ -155,6 +155,7 @@ def vsp_sweep(vsp3_path):
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "WakeNumIter", {iarr(15)}, 0 );',
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "NCPU",        {iarr(8)}, 0 );',
         f'    Print( "--- Running Aero Sweep ---" );',
+        f'    SetStringAnalysisInput( "VSPAEROSweep", "RedirectFile", array<string> = {{"{vsp3_path}_log.txt"}}, 0 );',
         f'    ExecAnalysis( "VSPAEROSweep" );',
         "}",
     ]
@@ -215,6 +216,7 @@ def vsp_stability(vsp3_path):
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "UnsteadyType", {iarr(1)}, 0 );',
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "NCPU",         {iarr(8)}, 0 );',
         f'    Print( "--- Running Stability Sweep ---" );',
+        f'    SetStringAnalysisInput( "VSPAEROSweep", "RedirectFile", array<string> = {{"{vsp3_path}_log.txt"}}, 0 );',
         f'    ExecAnalysis( "VSPAEROSweep" );',
         "}",
     ]

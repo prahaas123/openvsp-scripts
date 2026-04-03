@@ -169,6 +169,7 @@ def vsp_point(vsp3_path, vin, alpha, Sref, bref, cref):
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "WakeNumIter",    {iarr(15)}, 0 );',
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "NCPU",           {iarr(8)}, 0 );',
         f'    Print( "--- Running Aero Point ---" );',
+        f'    SetStringAnalysisInput( "VSPAEROSweep", "RedirectFile", array<string> = {{"{vsp3_path}_log.txt"}}, 0 );',
         f'    ExecAnalysis( "VSPAEROSweep" );',
         "}",
     ]
