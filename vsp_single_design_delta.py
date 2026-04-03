@@ -8,18 +8,18 @@ vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 20
 wing_chord_res = 50
-velocity = 10 # m/s
+speeds = list(range(5, 45, 5)) # m/s
 alphas = list(range(-5, 15)) # degrees AoA
 
 airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
 
-root_chord = 0.15
-taper_ratio = 0.334
-sweep = 34.171684
+root_chord = 0.2556
+taper_ratio = 0.3377
+sweep = 42.2426
 dihedral = 5.0
-twist = -9.016269
-span = 0.9
-x_cg = 0.13
+twist = -1.8498
+span = 0.9034
+x_cg = 0.2082
 elevon_length = 0.1         # % of chord
 elevon_start = 0.2          # % of wingspan
 elevon_end = 0.8            # % of wingspan
@@ -29,8 +29,9 @@ def main():
     stl_path, vsp3_path = generate_wing("wing")
     visualize_stl(stl_path)
 
-    CL, CD, Cm = vsp_sweep(vsp3_path)
-    aero_results = zip(alphas, CL, CD, Cm)
+    Mach, AoA, CL, CD, Cm = vsp_sweep(vsp3_path)
+    speeds = [round(m * 343.0, 1) for m in Mach]
+    aero_results = zip(speeds, AoA, CL, CD, Cm)
 
     for filename in glob.glob("wing*"):
         try:
@@ -39,13 +40,13 @@ def main():
             pass
 
     aero_filename = "cfd_sweep.csv"
-    aero_headers = ["Alpha_deg", "CL", "CD", "Cm"]
+    aero_headers = ["Speed_m/s", "Alpha_deg", "CL", "CD", "Cm"]
     with open(aero_filename, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(aero_headers)
         writer.writerows(aero_results)
 
-    # Stability sweep
+    # # Stability sweep
     stl_path, vsp3_path = generate_wing("wing")
     vsp_stability(vsp3_path)
 
@@ -126,7 +127,7 @@ def vsp_sweep(vsp3_path):
     Sref = 0.5 * (root_chord + root_chord * taper_ratio) * span
     bref = span
     cref = root_chord
-    mach = velocity / 343.0
+    machs = [v / 343.0 for v in speeds]
 
     script_lines = [
         "void main() {",
@@ -148,9 +149,10 @@ def vsp_sweep(vsp3_path):
         f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaStart",  {darr(float(alphas[0]))}, 0 );',
         f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaEnd",    {darr(float(alphas[-1]))}, 0 );',
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "AlphaNpts",   {iarr(len(alphas))}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "MachStart",   {darr(mach)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "MachNpts",    {iarr(1)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Vinf",        {darr(velocity)}, 0 );',
+        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "MachStart",   {darr(float(machs[0]))}, 0 );',
+        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "MachEnd",     {darr(float(machs[-1]))}, 0 );',
+        f'    SetIntAnalysisInput(    "VSPAEROSweep", "MachNpts",    {iarr(len(machs))}, 0 );',
+        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Vinf",        {darr(20.0)}, 0 );',
         f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Xcg",         {darr(x_cg)}, 0 );',
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "WakeNumIter", {iarr(15)}, 0 );',
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "NCPU",        {iarr(8)}, 0 );',
@@ -168,8 +170,8 @@ def vsp_sweep(vsp3_path):
     subprocess.run([vsp_exe, "-script", script_path], check=True)
     os.remove(script_path)
 
-    CL, CD, Cm = parse_polar("wing.polar")
-    return CL, CD, Cm
+    Mach, AoA, CL, CD, Cm = parse_polar("wing.polar")
+    return Mach, AoA, CL, CD, Cm
 
 def vsp_stability(vsp3_path):
     Sref = 0.5 * (root_chord + root_chord * taper_ratio) * span
@@ -230,8 +232,8 @@ def vsp_stability(vsp3_path):
     os.remove(script_path)
 
 def parse_polar(polar_path):
-    CL, CD, Cm = [], [], []
-    col_cl = col_cd = col_cm = None
+    Mach, AoA, CL, CD, Cm = [], [], [], [], []
+    col_mach = col_aoa = col_cl = col_cd = col_cm = None
  
     with open(polar_path, 'r') as f:
         for line in f:
@@ -240,20 +242,24 @@ def parse_polar(polar_path):
                 continue
             tokens = stripped.split()
             if tokens[0] == 'Beta':
-                col_cl = tokens.index('CLtot')
-                col_cd = tokens.index('CDtot')
-                col_cm = tokens.index('CMytot')
+                col_mach = tokens.index('Mach')
+                col_aoa  = tokens.index('AoA')
+                col_cl   = tokens.index('CLtot')
+                col_cd   = tokens.index('CDtot')
+                col_cm   = tokens.index('CMytot')
                 continue
             if col_cl is None:
                 continue
             try:
+                Mach.append(float(tokens[col_mach]))
+                AoA.append(float(tokens[col_aoa]))
                 CL.append(float(tokens[col_cl]))
                 CD.append(float(tokens[col_cd]))
                 Cm.append(float(tokens[col_cm]))
             except (ValueError, IndexError):
                 continue
  
-    return CL, CD, Cm
+    return Mach, AoA, CL, CD, Cm
 
 def read_stability(stab_path, output_file="vsp_derivatives.csv"):
     col_alpha = col_beta = col_p = col_q = col_r = col_pitch = col_roll = None
