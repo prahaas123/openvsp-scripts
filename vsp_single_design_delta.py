@@ -10,7 +10,7 @@ wing_span_res = 20
 wing_chord_res = 50
 velocity = 20.0 # m/s (for stability sweep)
 speeds = list(range(5, 45, 5)) # m/s
-alphas = list(range(-5, 15)) # degrees AoA
+alphas = list(range(-5, 15, 5)) # degrees AoA
 
 airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
 
