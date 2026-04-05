@@ -16,16 +16,16 @@ vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 wing_span_res = 20
 wing_chord_res = 50
 velocity = 10 # m/s
-alpha = 5 # degrees AoA
+alpha = 3 # degrees AoA
 
-airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
+airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\mh45.dat"
 
 bounds = {
-    "wing_area":  (0.13, 0.21),     # meters^2
+    "wing_area":  (0.014, 0.02),     # meters^2
     "taper":      (0.1, 1.0),       # ratio
-    "sweep":      (10.0, 70.0),     # degrees
-    "twist":      (-10.0, 0.0),     # degrees
-    "span":       (0.5, 2.0)        # meters
+    "sweep":      (0.0, 30.0),     # degrees
+    "twist":      (-8.0, 0.0),     # degrees
+    "span":       (0.4, 0.7)        # meters
 }
 
 num_mc_samples = 500
@@ -34,7 +34,7 @@ def main():
     total_sims = num_mc_samples
     print(f"--- STARTING MONTE CARLO SWEEP ---")
     print(f"Total Designs to Simulate: {total_sims}")
-    print(f"Estimated Time (@5s/sim): {total_sims * 5 / 60:.1f} minutes")
+    print(f"Estimated Time (@6s/sim): {total_sims * 6 / 60:.1f} minutes")
     time.sleep(5)  # Brief pause before starting
     
     results = []
