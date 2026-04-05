@@ -11,17 +11,17 @@ vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 20
 wing_chord_res = 50
-velocity = 10 # m/s
+velocity = 15 # m/s
 alpha = 3 # degrees AoA
 
-airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\dae21.dat"
+airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\mh45.dat"
 
-MAX_WEIGHT = 5   # Newtons
-MIN_S_REF = 0.13  # m2
-MAX_S_REF = 0.21  # m2
+MAX_WEIGHT = 3   # Newtons
+MIN_S_REF = 0.1  # m2
+MAX_S_REF = 0.2  # m2
 STATIC_MARGIN = 0.05
-CM_MIN = -0.15   # lower bound on CM about CG
-CM_MAX =  0.15   # upper bound on CM about CG
+CM_MIN = -0.05   # lower bound on CM about CG
+CM_MAX =  0.05   # upper bound on CM about CG
 AR_MIN = 3.0
 AR_MAX = 6.0
 TIP_CHORD_MIN = 0.05
@@ -67,7 +67,6 @@ def main():
         )
         print(f"\nOptimization finished.")
     except KeyboardInterrupt:
-        # This catches the Ctrl+C
         print("\n\nOptimization interrupted by user! Generating results from the best logged design so far...")
 
     # Look up values from the log (safest way to get the best strictly feasible run)
