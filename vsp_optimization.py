@@ -61,7 +61,7 @@ def main():
             mutation=(0.5, 1.0),
             popsize=6,               # Population members = popsize * parameters 
             maxiter=30,              # n_max_gen
-            tol=1e-6,                # ftol
+            tol=1e-3,                # ftol
             seed=1,
             disp=True
         )
