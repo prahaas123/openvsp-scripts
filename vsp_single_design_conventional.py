@@ -8,37 +8,37 @@ vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 20
 wing_chord_res = 50
-velocity = 10 # m/s
+velocities = [10] # m/s
 alphas = list(range(-5, 15)) # degrees AoA
 
-airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\s1223.dat"
+airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\goe322.dat"
 
 x_cg = 0.06
 
 wing_params = {
-    "span": 1.3,          # [m]
-    "root_chord": 0.15,   # [m]
-    "taper": 0.7,         # [Ratio]
-    "sweep": 5.0,         # [deg] Leading Edge Sweep
+    "span": 1.19,          # [m]
+    "root_chord": 0.225,   # [m]
+    "taper": 1.0,         # [Ratio]
+    "sweep": 0.0,         # [deg] Leading Edge Sweep
     "dihedral": 0.0,      # [deg]
     "twist": 0.0,         # [deg] Washout at tip
-    "alpha": 2.5          # [deg]
+    "alpha": 3.0          # [deg]
 }
 
 htail_params = {
-    "chord": 0.1,
+    "chord": 0.118,
     "l_H": 0.65,        # [m] Tail Moment Arm (Distance from CG to Tail AC)
     "airfoil": "0012",
-    "span": 0.6,
-    "alpha": -0.5
+    "span": 0.414,
+    "alpha": -4.1691
 }
 
 vtail_params = {
-    "chord": 0.15,
+    "chord": 0.118,
     "airfoil": "0012",
     "span": 0.18,
-    "taper": 0.6,
-    "sweep": 25.0
+    "taper": 0.7,
+    "sweep": 15.0
 }
 
 def main():
@@ -47,36 +47,52 @@ def main():
     cref = wing_params["root_chord"]
 
     # Aero sweep
-    stl_path, vsp3_path = generate_wing_and_tail("plane")
-    visualize_stl(stl_path)
+    for v in velocities:
+        print(f"\n=== Running VSP Aero Sweep at {v} m/s ===")
+        stl_path, vsp3_path = generate_wing_and_tail("plane")
+        visualize_stl(stl_path)
+        CL, CD, Cm = vsp_sweep(vsp3_path, v, Sref, bref, cref)
+        lod_filename = "plane.lod"
+        cl_data = read_lift_distribution(lod_filename)
+        first_aoa_key = list(cl_data.keys())[0]
+        span_locations = cl_data[first_aoa_key]['SoverB']
+        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm"] + [f"Cl_span_{loc:.4f}" for loc in span_locations]
 
-    CL, CD, Cm = vsp_sweep(vsp3_path, Sref, bref, cref)
-    aero_results = zip(alphas, CL, CD, Cm)
+        # Combine  sweep results with local spanwise results
+        aero_results = []
+        for i, alpha in enumerate(alphas):
+            base_row = [v, alpha, CL[i], CD[i], Cm[i]]
+            # Safely find the corresponding AoA in the parsed dictionary to avoid errors
+            closest_aoa_key = min(cl_data.keys(), key=lambda k: abs(k - alpha))
+            spanwise_cls = cl_data[closest_aoa_key]['Cl']
+            full_row = base_row + spanwise_cls
+            aero_results.append(full_row)
 
-    for filename in glob.glob("plane*"):
-        try:
-            os.remove(filename)
-        except OSError:
-            pass
+        # Write to CSV
+        aero_filename = "cfd_sweep.csv"
+        with open(aero_filename, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(aero_headers)
+            writer.writerows(aero_results)
 
-    aero_filename = "cfd_sweep.csv"
-    aero_headers = ["Alpha_deg", "CL", "CD", "Cm"]
-    with open(aero_filename, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(aero_headers)
-        writer.writerows(aero_results)
+        # File Cleanup
+        for filename in glob.glob("plane*"):
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
 
-    # Stability sweep
-    stl_path, vsp3_path = generate_wing_and_tail("plane")
-    vsp_stability(vsp3_path, Sref, bref, cref)
+    # # Stability sweep
+    # stl_path, vsp3_path = generate_wing_and_tail("plane")
+    # vsp_stability(vsp3_path, Sref, bref, cref)
 
-    read_stability("plane.stab")
+    # read_stability("plane.stab")
 
-    for filename in glob.glob("plane*"):
-        try:
-            os.remove(filename)
-        except OSError:
-            pass
+    # for filename in glob.glob("plane*"):
+    #     try:
+    #         os.remove(filename)
+    #     except OSError:
+    #         pass
 
 def generate_wing_and_tail(plane_name):
     airfoil_fwd  = airfoil_file.replace("\\", "/")
@@ -209,7 +225,7 @@ def visualize_stl(stl_path):
     else:
         print("Error: STL not found.")
 
-def vsp_sweep(vsp3_path, Sref, bref, cref):
+def vsp_sweep(vsp3_path, velocity, Sref, bref, cref):
     mach = velocity / 343.0
 
     script_lines = [
@@ -253,7 +269,7 @@ def vsp_sweep(vsp3_path, Sref, bref, cref):
     CL, CD, Cm = parse_polar("plane.polar")
     return CL, CD, Cm
 
-def vsp_stability(vsp3_path, Sref, bref, cref):
+def vsp_stability(vsp3_path, velocity, Sref, bref, cref):
     mach = velocity / 343.0
 
     script_lines = [
@@ -392,6 +408,39 @@ def read_stability(stab_path, output_file="vsp_derivatives.csv"):
             writer.writerow([key, val])
  
     print(f"Successfully generated {output_file} formatted for the 6-DOF simulator.")
+    
+def read_lift_distribution(filepath, target_vortex_sheet=1):
+    data_by_aoa = {}
+    current_aoa = None
+    
+    with open(filepath, 'r') as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue
+                
+            if line.startswith("AoA_"):
+                parts = line.split()
+                current_aoa = float(parts[1])
+                
+                if current_aoa not in data_by_aoa:
+                    data_by_aoa[current_aoa] = {'SoverB': [], 'Cl': []}
+            
+            else:
+                parts = line.split()
+                if len(parts) > 15:
+                    try:
+                        vortex_sheet = int(parts[1])
+                        if vortex_sheet == target_vortex_sheet and current_aoa is not None:
+                            soverb = float(parts[7])
+                            cl = float(parts[11])
+                            data_by_aoa[current_aoa]['SoverB'].append(soverb)
+                            data_by_aoa[current_aoa]['Cl'].append(cl)
+                            
+                    except ValueError:
+                        pass
+                        
+    return data_by_aoa
     
 # AngelScript array literal helpers
 def iarr(v):
