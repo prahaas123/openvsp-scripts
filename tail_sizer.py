@@ -36,7 +36,7 @@ htail_params = {
 }
  
 vtail_params = {
-    "V_V": 0.04,          # Vertical Tail Volume Coefficient (Typical: 0.03 - 0.06)
+    "V_V": 0.05,          # Vertical Tail Volume Coefficient (Typical: 0.03 - 0.06)
     "airfoil": "0012",
     "aspect_ratio": 1.5
 } 
@@ -55,10 +55,11 @@ def main():
     # Generate initial tail geometry
     S_tail = (htail_params["V_H"] * wing_params["span"] * wing_params["span"] * wing_params["root_chord"]) / htail_params["l_H"]
     b_tail = math.sqrt(S_tail * htail_params["aspect_ratio"])
+    vtail_height = math.sqrt((vtail_params["V_V"] * wing_params["span"] * wing_params["span"] * wing_params["root_chord"]) / htail_params["l_H"])
  
     tail_name = f"plane_{uuid.uuid4().hex[:8]}"
     new_x_cg = calc_cg(S_tail)
-    generate_wing_and_htail(tail_name, b_tail, 0.0)
+    generate_wing_and_tail(tail_name, b_tail, 0.0, vtail_height)
     moment = get_moment(tail_name, new_x_cg, Sref, cref)
  
     # Tail incidence sizing loop (secant method)
@@ -75,7 +76,7 @@ def main():
     else:
         i_new = -2.0  # Initial guess
         tail_name = f"plane_{uuid.uuid4().hex[:8]}"
-        generate_wing_and_htail(tail_name, b_tail, i_new)
+        generate_wing_and_tail(tail_name, b_tail, i_new, vtail_height)
         m_new = get_moment(tail_name, new_x_cg, Sref, cref)
         print(f"Iter 1: Tail Alpha = {i_new:.2f} deg -> CMy = {m_new:.6f}")
  
@@ -94,7 +95,7 @@ def main():
             i_new = i_next
  
             tail_name = f"plane_{uuid.uuid4().hex[:8]}"
-            generate_wing_and_htail(tail_name, b_tail, i_new)
+            generate_wing_and_tail(tail_name, b_tail, i_new, vtail_height)
             m_new = get_moment(tail_name, x_cg, Sref, cref)
             print(f"Iter {iteration}: Tail Alpha = {i_new:.2f} deg -> CMy = {m_new:.6f}")
         else:
@@ -105,7 +106,7 @@ def main():
         print(f"Final Tail Alpha for Trim: {i_new:.4f} degrees with CMy = {m_new:.6f}")
         print(f"Horizontal tail dimensions: Chord: {tail_chord:.3f}m, Span: {b_tail:.3f}m")
         print(f"Final CG location: {new_x_cg:.3f}m from LE, for a Static Margin of {SM*100:.1f}%")
-        generate_wing_and_htail("plane_final", b_tail, i_new)
+        generate_wing_and_tail("plane_final", b_tail, i_new, vtail_height)
         visualize_stl("plane_final.stl")
 
 def generate_wing(wing_name):
@@ -150,23 +151,24 @@ def generate_wing(wing_name):
     os.remove(script_path)
     print(f"VSP file saved: {wing_name}.vsp3")
 
-def generate_wing_and_htail(plane_name, htail_b, htail_alpha):
-    airfoil_fwd = airfoil_file.replace("\\", "/")
-    tip_chord   = wing_params["root_chord"] * wing_params["taper"]
+def generate_wing_and_tail(plane_name, htail_b, htail_alpha, vtail_height):
+    airfoil_fwd  = airfoil_file.replace("\\", "/")
+    tip_chord    = wing_params["root_chord"] * wing_params["taper"]
     tail_chord  = htail_b / htail_params["aspect_ratio"]
- 
+
     def naca4(code):
         return int(code[0]) / 100.0, int(code[1]) / 10.0, int(code[2:]) / 100.0
     h_camber, h_cam_loc, h_thick = naca4(htail_params["airfoil"])
- 
+    v_camber, v_cam_loc, v_thick = naca4(vtail_params["airfoil"])
+
     script_lines = [
         "void main() {",
         "    VSPCheckSetup();",
         "    ClearVSPModel();",
- 
+
         # ---- Main wing ----
         '    string wing_id = AddGeom( "WING" );',
-        '    SetGeomName( wing_id, "Main_Wing" );',
+        '    SetGeomName( wing_id, "MainWing" );',
         f'    SetParmVal( wing_id, "TotalSpan",      "WingGeom", {wing_params["span"]} );',
         f'    SetParmVal( wing_id, "Root_Chord",     "XSec_1",   {wing_params["root_chord"]} );',
         f'    SetParmVal( wing_id, "Tip_Chord",      "XSec_1",   {tip_chord} );',
@@ -185,17 +187,23 @@ def generate_wing_and_htail(plane_name, htail_b, htail_alpha):
         '    ChangeXSecShape( w_tip_surf, 1, XS_FILE_AIRFOIL );',
         '    string w_tip_xsec = GetXSec( w_tip_surf, 1 );',
         f'    ReadFileAirfoil( w_tip_xsec, "{airfoil_fwd}" );',
+        '    AddSubSurf( wing_id, SS_CONTROL );',
+        '    SetParmVal( wing_id, "SE_Const_Flag",  "SS_Control_1", 1.0 );',
+        '    SetParmVal( wing_id, "Length_C_Start", "SS_Control_1", 0.2 );',
+        '    SetParmVal( wing_id, "EtaFlag",        "SS_Control_1", 1.0 );',
+        '    SetParmVal( wing_id, "EtaStart",       "SS_Control_1", 0.2 );',
+        '    SetParmVal( wing_id, "EtaEnd",         "SS_Control_1", 0.8 );',
         '    SetSetFlag( wing_id, 1, true );',
- 
+
         # ---- Horizontal tail ----
-        '    string htail_id = AddGeom( "WING", wing_id );',
-        '    SetGeomName( htail_id, "Horizontal_Tail" );',
+        '    string htail_id = AddGeom( "WING" );',
+        '    SetGeomName( htail_id, "HorizontalTail" );',
         f'    SetParmVal( htail_id, "TotalSpan",      "WingGeom", {htail_b} );',
         f'    SetParmVal( htail_id, "Root_Chord",     "XSec_1",   {tail_chord} );',
         f'    SetParmVal( htail_id, "Tip_Chord",      "XSec_1",   {tail_chord} );',
-        f'    SetParmVal( htail_id, "Sweep",          "XSec_1",   0.0 );',
-        f'    SetParmVal( htail_id, "Dihedral",       "XSec_1",   0.0 );',
-        f'    SetParmVal( htail_id, "Twist",          "XSec_1",   0.0 );',
+        '    SetParmVal( htail_id, "Sweep",           "XSec_1",   0.0 );',
+        '    SetParmVal( htail_id, "Dihedral",        "XSec_1",   0.0 );',
+        '    SetParmVal( htail_id, "Twist",           "XSec_1",   0.0 );',
         f'    SetParmVal( htail_id, "SectTess_U",     "XSec_1",   {wing_span_res}.0 );',
         f'    SetParmVal( htail_id, "Tess_W",         "Shape",    {wing_chord_res}.0 );',
         f'    SetParmVal( htail_id, "X_Rel_Location", "XForm",    {htail_params["l_H"]} );',
@@ -206,22 +214,61 @@ def generate_wing_and_htail(plane_name, htail_b, htail_alpha):
         f'    SetParmVal( htail_id, "Camber",         "XSecCurve_1", {h_camber} );',
         f'    SetParmVal( htail_id, "CamberLoc",      "XSecCurve_1", {h_cam_loc} );',
         f'    SetParmVal( htail_id, "ThickChord",     "XSecCurve_1", {h_thick} );',
+        '    AddSubSurf( htail_id, SS_CONTROL );',
+        '    SetParmVal( htail_id, "SE_Const_Flag",  "SS_Control_1", 1.0 );',
+        '    SetParmVal( htail_id, "Length_C_Start", "SS_Control_1", 0.25 );',
+        '    SetParmVal( htail_id, "EtaFlag",        "SS_Control_1", 1.0 );',
+        '    SetParmVal( htail_id, "EtaStart",       "SS_Control_1", 0.0 );',
+        '    SetParmVal( htail_id, "EtaEnd",         "SS_Control_1", 0.8 );',
         '    SetSetFlag( htail_id, 1, true );',
- 
-        '    Update();',
+
+        # ---- Vertical tail ----
+        '    string vtail_id = AddGeom( "WING" );',
+        '    SetGeomName( vtail_id, "VerticalTail" );',
+        '    SetParmVal( vtail_id, "Sym_Planar_Flag", "Sym",      0.0 );',
+        f'    SetParmVal( vtail_id, "TotalSpan",      "WingGeom", {vtail_height} );',
+        f'    SetParmVal( vtail_id, "Root_Chord",     "XSec_1",   {tail_chord} );',
+        f'    SetParmVal( vtail_id, "Tip_Chord",      "XSec_1",   {tail_chord} );',
+        f'    SetParmVal( vtail_id, "Sweep",          "XSec_1",   {0.0} );',
+        f'    SetParmVal( vtail_id, "Dihedral",        "XSec_1",   0.0 );',
+        f'    SetParmVal( vtail_id, "Twist",           "XSec_1",   0.0 );',
+        f'    SetParmVal( vtail_id, "SectTess_U",     "XSec_1",   {wing_span_res}.0 );',
+        f'    SetParmVal( vtail_id, "Tess_W",         "Shape",    {wing_chord_res}.0 );',
+        f'    SetParmVal( vtail_id, "X_Rel_Location", "XForm",    {htail_params["l_H"]} );',
+        f'    SetParmVal( vtail_id, "X_Rel_Rotation",  "XForm",    90.0 );',
+        f'    SetParmVal( vtail_id, "Camber",         "XSecCurve_0", {v_camber} );',
+        f'    SetParmVal( vtail_id, "CamberLoc",      "XSecCurve_0", {v_cam_loc} );',
+        f'    SetParmVal( vtail_id, "ThickChord",     "XSecCurve_0", {v_thick} );',
+        f'    SetParmVal( vtail_id, "Camber",         "XSecCurve_1", {v_camber} );',
+        f'    SetParmVal( vtail_id, "CamberLoc",      "XSecCurve_1", {v_cam_loc} );',
+        f'    SetParmVal( vtail_id, "ThickChord",     "XSecCurve_1", {v_thick} );',
+        f'    AddSubSurf( vtail_id, SS_CONTROL );',
+        f'    SetParmVal( vtail_id, "SE_Const_Flag",  "SS_Control_1", 1.0 );',
+        f'    SetParmVal( vtail_id, "Length_C_Start", "SS_Control_1", 0.35 );',
+        f'    SetParmVal( vtail_id, "EtaFlag",        "SS_Control_1", 1.0 );',
+        f'    SetParmVal( vtail_id, "EtaStart",       "SS_Control_1", 0.2 );',
+        f'    SetParmVal( vtail_id, "EtaEnd",         "SS_Control_1", 0.8 );',
+        f'    SetSetFlag( vtail_id, 1, true );',
+
+        f'    Update();',
         f'    WriteVSPFile( "{plane_name}.vsp3", SET_ALL );',
         f'    ExportFile( "{plane_name}.stl", 0, EXPORT_STL );',
         "}",
     ]
- 
+
     script_path = f"{plane_name}_geom.vspscript"
     with open(script_path, 'w') as f:
         f.write("\n".join(script_lines))
- 
+
     print(f"--- Running geometry generation ({script_path}) ---")
     subprocess.run([vsp_exe, "-script", script_path], check=True)
     os.remove(script_path)
-    print(f"VSP file saved: {plane_name}.vsp3")
+
+    stl_path  = f"{plane_name}.stl"
+    vsp3_path = f"{plane_name}.vsp3"
+    print(f"STL generated: {stl_path}")
+    print(f"VSP file saved: {vsp3_path}")
+    return stl_path, vsp3_path
 
 def visualize_stl(stl_path):
     if os.path.exists(stl_path):
