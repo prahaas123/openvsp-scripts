@@ -11,27 +11,28 @@ wing_span_res = 20
 wing_chord_res = 50
 velocity = 10 # m/s
 alpha = 0 # degrees AoA
+SM = 0.10  # Desired Static Margin
  
-airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\s1223.dat"
+airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\goe322.dat"
  
 moment_tolerance = 0.05
 tail_sizing_iterations = 10
  
 wing_params = {
-    "span": 1.0,          # [m]
-    "root_chord": 0.23,   # [m]
+    "span": 1.19,          # [m]
+    "root_chord": 0.225,   # [m]
     "taper": 1.0,         # [Ratio]
     "sweep": 0.0,         # [deg] Leading Edge Sweep
     "dihedral": 0.0,      # [deg]
     "twist": 0.0,         # [deg] Washout at tip
-    "alpha": 5.0          # [deg]
+    "alpha": 3.0          # [deg]
 }
  
 htail_params = {
     "V_H": 0.10,           # Horizontal Tail Volume Coefficient (Typical: 0.4 - 0.6)
-    "l_H": 0.38,          # [m] Tail Moment Arm (Distance from CG to Tail LE)
+    "l_H": 0.65,          # [m] Tail Moment Arm (Distance from CG to Tail LE)
     "airfoil": "0012",
-    "aspect_ratio": 4.0
+    "aspect_ratio": 3.0
 }
  
 vtail_params = {
@@ -56,8 +57,9 @@ def main():
     b_tail = math.sqrt(S_tail * htail_params["aspect_ratio"])
  
     tail_name = f"plane_{uuid.uuid4().hex[:8]}"
+    new_x_cg = calc_cg(S_tail)
     generate_wing_and_htail(tail_name, b_tail, 0.0)
-    moment = get_moment(tail_name, x_cg, Sref, cref)
+    moment = get_moment(tail_name, new_x_cg, Sref, cref)
  
     # Tail incidence sizing loop (secant method)
     i_old = 0.0
@@ -74,7 +76,7 @@ def main():
         i_new = -2.0  # Initial guess
         tail_name = f"plane_{uuid.uuid4().hex[:8]}"
         generate_wing_and_htail(tail_name, b_tail, i_new)
-        m_new = get_moment(tail_name, x_cg, Sref, cref)
+        m_new = get_moment(tail_name, new_x_cg, Sref, cref)
         print(f"Iter 1: Tail Alpha = {i_new:.2f} deg -> CMy = {m_new:.6f}")
  
         for iteration in range(2, tail_sizing_iterations + 1):
@@ -102,6 +104,7 @@ def main():
         tail_chord = b_tail / htail_params["aspect_ratio"]
         print(f"Final Tail Alpha for Trim: {i_new:.4f} degrees with CMy = {m_new:.6f}")
         print(f"Horizontal tail dimensions: Chord: {tail_chord:.3f}m, Span: {b_tail:.3f}m")
+        print(f"Final CG location: {new_x_cg:.3f}m from LE, for a Static Margin of {SM*100:.1f}%")
         generate_wing_and_htail("plane_final", b_tail, i_new)
         visualize_stl("plane_final.stl")
 
@@ -304,6 +307,26 @@ def parse_moment(polar_path):
             except (ValueError, IndexError):
                 continue
     raise ValueError(f"CMytot not found in {polar_path}")
+
+def calc_cg(S_tail, SM=SM):
+    b, c_r, taper = wing_params["span"], wing_params["root_chord"], wing_params["taper"]
+    l_H, AR_t = htail_params["l_H"], htail_params["aspect_ratio"]
+    AR_w = b**2 / (0.5 * (c_r + taper * c_r) * b)
+    sweep_qc = math.atan(math.tan(math.radians(wing_params["sweep"])) - (4/AR_w) * (0.25 * (1 - taper) / (1 + taper)))
+
+    S_w = 0.5 * (c_r + taper * c_r) * b
+    MAC = (2/3) * c_r * (1 + taper + taper**2) / (1 + taper)
+    AR_w = b**2 / S_w
+    sweep_qc = math.atan(math.tan(math.radians(wing_params["sweep"])) - (4/AR_w) * (0.25 * (1 - taper) / (1 + taper)))
+
+    a_w = (2 * math.pi * AR_w) / (2 + math.sqrt(4 + AR_w**2 * (1 + math.tan(sweep_qc)**2)))
+    a_t = (2 * math.pi * AR_t) / (2 + math.sqrt(4 + AR_t**2))
+
+    NP = 0.25 + (S_tail * l_H) / (S_w * MAC) * (a_t / a_w) * (1 - 2 * a_w / (math.pi * AR_w))
+    x_cg = (NP - SM) * MAC
+
+    print(f"CG location: {x_cg:.4f} m from LE for Static Margin of {SM*100:.1f}%")
+    return x_cg
 
 # AngelScript array literal helpers
 def iarr(v):

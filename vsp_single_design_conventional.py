@@ -12,9 +12,9 @@ wing_chord_res = 50
 velocities = [10] # m/s
 alphas = list(range(-5, 15)) # degrees AoA
 
-airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\goe322.dat"
+airfoil_file = r"Airfoils\goe322.dat"
 
-x_cg = 0.06
+x_cg = 0.065
 
 wing_params = {
     "span": 1.19,          # [m]
@@ -27,15 +27,15 @@ wing_params = {
 }
 
 htail_params = {
-    "chord": 0.118,
+    "chord": 0.128,
     "l_H": 0.65,        # [m] Tail Moment Arm (Distance from CG to Tail AC)
     "airfoil": "0012",
-    "span": 0.414,
-    "alpha": -4.1691
+    "span": 0.383,
+    "alpha": 0.9423
 }
 
 vtail_params = {
-    "chord": 0.118,
+    "chord": 0.128,
     "airfoil": "0012",
     "span": 0.18,
     "taper": 0.7,
@@ -72,7 +72,7 @@ def main():
             aero_results.append(full_row)
 
         # Write to CSV
-        aero_filename = "cfd_sweep.csv"
+        aero_filename = "aero_full.csv"
         with open(aero_filename, 'a', newline='') as f:
             writer = csv.writer(f)
             if not csv_exists:
@@ -87,17 +87,31 @@ def main():
             except OSError:
                 pass
 
-    # # Stability sweep
-    # stl_path, vsp3_path = generate_wing_and_tail("plane")
-    # vsp_stability(vsp3_path, Sref, bref, cref)
+    # Stability sweep
+    stab_csv_exists = False
+    
+    for v in velocities:
+        stl_path, vsp3_path = generate_wing_and_tail("plane")
+        vsp_stability(vsp3_path, v, Sref, bref, cref)
+        stab_dict = read_stability("plane.stab")
+        sm = get_sm("plane.stab", cg=x_cg, mac=cref)
+        
+        stability_filename = "stability.csv"
+        stab_headers = ["Velocity"] + list(stab_dict.keys()) + ["StaticMargin"]
+        stab_columns = [v] + list(stab_dict.values()) + [sm]
+        
+        with open(stability_filename, 'a', newline='') as f:
+            writer = csv.writer(f)
+            if not stab_csv_exists:
+                writer.writerow(stab_headers)
+                stab_csv_exists = True
+            writer.writerow(stab_columns)
 
-    # read_stability("plane.stab")
-
-    # for filename in glob.glob("plane*"):
-    #     try:
-    #         os.remove(filename)
-    #     except OSError:
-    #         pass
+        for filename in glob.glob("plane*"):
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
 
 def generate_wing_and_tail(plane_name):
     airfoil_fwd  = airfoil_file.replace("\\", "/")
@@ -305,7 +319,7 @@ def vsp_stability(vsp3_path, velocity, Sref, bref, cref):
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "AlphaNpts",      {iarr(1)}, 0 );',
         f'    SetDoubleAnalysisInput( "VSPAEROSweep", "MachStart",      {darr(mach)}, 0 );',
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "MachNpts",       {iarr(1)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Vinf",           {darr(100.0)}, 0 );',
+        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Vinf",           {darr(velocity)}, 0 );',
         f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Xcg",            {darr(x_cg)}, 0 );',
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "WakeNumIter",    {iarr(15)}, 0 );',
         f'    SetIntAnalysisInput(    "VSPAEROSweep", "UnsteadyType",   {iarr(1)}, 0 );',
@@ -353,7 +367,7 @@ def parse_polar(polar_path):
 
     return CL, CD, CDi, Cm
 
-def read_stability(stab_path, output_file="vsp_derivatives.csv"): 
+def read_stability(stab_path): 
     col_alpha = col_beta = col_p = col_q = col_r = None
     col_aileron = col_elevator = col_rudder = None
     rows = {}
@@ -392,7 +406,7 @@ def read_stability(stab_path, output_file="vsp_derivatives.csv"):
         return float('nan')
  
     vsp_dict = {
-        'CL_de':   get('CL',  col_elevator),  # CL  wrt elevator
+        'CL_de':   get('CL',  col_elevator),   # CL  wrt elevator
         'CY_beta': get('CS',  col_beta),       # CS  wrt Beta
         'CY_p':    get('CS',  col_p),          # CS  wrt p
         'CY_r':    get('CS',  col_r),          # CS  wrt r
@@ -408,13 +422,7 @@ def read_stability(stab_path, output_file="vsp_derivatives.csv"):
         'Cn_da':   get('CMn', col_aileron),    # CMn wrt aileron (adverse yaw)
     }
  
-    with open(output_file, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["Derivative", "Value"])
-        for key, val in vsp_dict.items():
-            writer.writerow([key, val])
- 
-    print(f"Successfully generated {output_file} formatted for the 6-DOF simulator.")
+    return vsp_dict
     
 def read_lift_distribution(filepath, target_vortex_sheet=1):
     data_by_aoa = {}
@@ -459,6 +467,23 @@ def compute_oswald(cl, cdi, s, b):
     if e.ndim == 0:
         return float(e)
     return e
+    
+def get_sm(stab_path, cg=x_cg, mac=1.0):
+    with open(stab_path, 'r') as f:
+        for line in f:
+            stripped = line.strip()
+            
+            if stripped.startswith('X_np'):
+                parts = stripped.split()
+                try:
+                    np_val = float(parts[1])
+                    sm = (np_val - cg) / mac
+                    return sm
+                    
+                except (ValueError, IndexError):
+                    return float('nan')
+                    
+    return float('nan')
     
 # AngelScript array literal helpers
 def iarr(v):
