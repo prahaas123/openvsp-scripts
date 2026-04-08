@@ -14,7 +14,7 @@ vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 20
 wing_chord_res = 50
-velocities = list(range(10.0, 50.0, 5.0)) # m/s
+velocities = list(range(10, 50, 5)) # m/s
 alphas = list(range(-5, 15, 1)) # degrees AoA
 
 airfoil_file = r"Airfoils\mh45.dat"
@@ -36,8 +36,6 @@ def main():
         os.remove("stability.csv")
     except OSError:
         pass
-    stl_path, vsp3_path = generate_wing("wing")
-    visualize_stl(stl_path)
     Sref = 0.5 * (root_chord + root_chord * taper_ratio) * span
     bref = span
     cref = root_chord
@@ -46,6 +44,7 @@ def main():
     csv_exists = False
     for v in velocities:
         print(f"\n=== Running VSP Aero Sweep at {v} m/s ===")
+        stl_path, vsp3_path = generate_wing("wing")
         CL, CD, CDi, Cm = vsp_sweep(vsp3_path, v, Sref, bref, cref)
         lod_filename = "wing.lod"
         cl_data = read_lift_distribution(lod_filename)
@@ -440,7 +439,7 @@ def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     PLOT_TEMPLATE = "plotly_dark"
 
     app.layout = dbc.Container([
-        html.H1("Aircraft Performance Dashboard", className="mt-4 mb-4 text-center"),
+        html.H1("Flying Wing Performance", className="mt-4 mb-4 text-center"),
         
         dcc.Tabs([
             # --- TAB 1: AERODYNAMICS ---
@@ -467,7 +466,7 @@ def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
                             dcc.Dropdown(
                                 id='alpha-dropdown',
                                 options=[{'label': f"{a}°", 'value': a} for a in df_aero['Alpha_deg'].unique()],
-                                value=df_aero['Alpha_deg'].min(),
+                                value=0,
                                 clearable=False,
                                 style={'color': 'black', 'width': '100px', 'display': 'inline-block', 'verticalAlign': 'middle'}
                             )
@@ -479,30 +478,24 @@ def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
 
             # --- TAB 2: STABILITY ---
             dcc.Tab(label='Stability', children=[
+                # Row 1
                 dbc.Row([
-                    # Left: Derivative Bars
-                    dbc.Col([
-                        html.H4("Static Stability Derivatives", className="mt-3 text-center"),
-                        html.Label("Select Velocity (m/s):"),
-                        dcc.Slider(
-                            id='vel-slider',
-                            min=df_stab['Velocity'].min(),
-                            max=df_stab['Velocity'].max(),
-                            step=None,
-                            marks={int(v): {'label': str(int(v)), 'style': {'color': 'white'}} for v in df_stab['Velocity'].unique()},
-                            value=df_stab['Velocity'].min()
-                        ),
-                        dcc.Graph(id='graph-stab-bars'),
-                        html.Div(id='static-margin-text', className="lead text-center font-weight-bold mt-2")
-                    ], width=6),
-
-                    # Right: Trends
-                    dbc.Col([
-                        html.H4("Stability Trends", className="mt-3 text-center"),
-                        dcc.Graph(id='graph-lon-trends'),
-                        dcc.Graph(id='graph-lat-trends')
-                    ], width=6)
-                ])
+                    dbc.Col(dcc.Graph(id='stab-cl-beta'), width=4),
+                    dbc.Col(dcc.Graph(id='stab-cn-beta'), width=4),
+                    dbc.Col(dcc.Graph(id='stab-static-margin'), width=4),
+                ], className="mt-3"),
+                # Row 2
+                dbc.Row([
+                    dbc.Col(dcc.Graph(id='stab-cl-p'), width=4),
+                    dbc.Col(dcc.Graph(id='stab-cn-p'), width=4),
+                    dbc.Col(dcc.Graph(id='stab-cm-q'), width=4),
+                ], className="mt-3"),
+                # Row 3
+                dbc.Row([
+                    dbc.Col(dcc.Graph(id='stab-cl-r'), width=4),
+                    dbc.Col(dcc.Graph(id='stab-cn-r'), width=4),
+                    dbc.Col(dcc.Graph(id='stab-cm-de'), width=4),
+                ], className="mt-3"),
             ], className="p-3")
         ])
     ], fluid=True)
@@ -521,7 +514,7 @@ def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     def update_aero_plots(_):
         # Helper to create styled line plots
         def create_fig(y_col, title, x_col='Alpha_deg'):
-            fig = px.line(df_aero, x=x_col, y=y_col, title=title, markers=True, template=PLOT_TEMPLATE)
+            fig = px.line(df_aero, x=x_col, y=y_col, color='Velocity', title=title, markers=True, template=PLOT_TEMPLATE)
             fig.update_layout(margin=dict(l=20, r=20, t=40, b=20))
             return fig
 
@@ -554,31 +547,33 @@ def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
         return fig
 
     @app.callback(
-        [Output('graph-stab-bars', 'figure'),
-         Output('graph-lon-trends', 'figure'),
-         Output('graph-lat-trends', 'figure'),
-         Output('static-margin-text', 'children')],
-        [Input('vel-slider', 'value')]
+        [Output('stab-cl-beta', 'figure'), Output('stab-cn-beta', 'figure'), Output('stab-static-margin', 'figure'),
+         Output('stab-cl-p', 'figure'), Output('stab-cn-p', 'figure'), Output('stab-cm-q', 'figure'),
+         Output('stab-cl-r', 'figure'), Output('stab-cn-r', 'figure'), Output('stab-cm-de', 'figure')],
+        [Input('alpha-dropdown', 'value')] # Using any input to trigger initial load
     )
-    def update_stability(selected_vel):
-        row = df_stab[df_stab['Velocity'] == selected_vel].iloc[0]
-        
-        # Derivatives Bar Chart
-        derivs = ['CY_beta', 'Cl_beta', 'Cn_beta', 'Cm_q', 'Cm_de']
-        fig_bar = px.bar(x=derivs, y=[row[d] for d in derivs], title="Derivatives", template=PLOT_TEMPLATE)
-        
-        # Longitudinal Trends
-        fig_lon = px.line(df_stab, x='Velocity', y=['Cm_q', 'Cm_de'], title="Longitudinal Trends", template=PLOT_TEMPLATE)
-        
-        # Lateral Trends
-        fig_lat = px.line(df_stab, x='Velocity', y=['Cl_beta', 'Cn_beta', 'Cl_p', 'Cl_r'], title="Lateral Trends", template=PLOT_TEMPLATE)
-        
-        sm_text = f"Static Margin: {row['StaticMargin']*100:.2f}%"
-        
-        return fig_bar, fig_lon, fig_lat, sm_text
+    def update_stability_grid(_):
+        def create_stab_fig(y_col, title, color="#3498DB"):
+            fig = px.line(df_stab, x='Velocity', y=y_col, markers=True, template=PLOT_TEMPLATE, title=title)
+            fig.update_traces(line_color=color)
+            fig.update_layout(margin=dict(l=20, r=20, t=40, b=20))
+            return fig
+
+        return (
+            create_stab_fig('Cl_beta', 'Cl_beta (Dihedral Effect)', '#E74C3C'),
+            create_stab_fig('Cn_beta', 'Cn_beta (Directional Stability)', '#F1C40F'),
+            create_stab_fig('StaticMargin', 'Static Margin', "#2ECC70"),
+            create_stab_fig('Cl_p', 'Cl_p (Roll Damping)', "#2E65CC"),
+            create_stab_fig('Cn_p', 'Cn_p (Cross Derivative)', "#F0F0F0"),
+            create_stab_fig('Cm_q', 'Cm_q (Pitch Damping)', "#921CA1"),
+            create_stab_fig('Cl_r', 'Cl_r (Cross Derivative)', "#7E510F"),
+            create_stab_fig('Cn_r', 'Cn_r (Yaw Damping)', "#B95674"),
+            create_stab_fig('Cm_de', 'Cm_de (Elevator Authority)', "#0DB9B9")
+        )
 
     return app
 
 if __name__ == '__main__':
+    # main()
     app = plot_dashboards()
     app.run(debug=True)
