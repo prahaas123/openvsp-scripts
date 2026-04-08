@@ -3,6 +3,7 @@ import pyvista as pv
 import csv
 import glob
 import subprocess
+import numpy as np
 
 vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
@@ -42,37 +43,41 @@ vtail_params = {
 }
 
 def main():
-    Sref = wing_params["root_chord"] * wing_params["span"]
     bref = wing_params["span"]
     cref = wing_params["root_chord"]
+    Sref = 0.5 * (cref + (cref * wing_params["taper"])) * bref
+    stl_path, vsp3_path = generate_wing_and_tail("plane")
+    visualize_stl(stl_path)
 
     # Aero sweep
+    csv_exists = False
     for v in velocities:
         print(f"\n=== Running VSP Aero Sweep at {v} m/s ===")
-        stl_path, vsp3_path = generate_wing_and_tail("plane")
-        visualize_stl(stl_path)
-        CL, CD, Cm = vsp_sweep(vsp3_path, v, Sref, bref, cref)
+        CL, CD, CDi, Cm = vsp_sweep(vsp3_path, v, Sref, bref, cref)
         lod_filename = "plane.lod"
         cl_data = read_lift_distribution(lod_filename)
         first_aoa_key = list(cl_data.keys())[0]
         span_locations = cl_data[first_aoa_key]['SoverB']
-        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm"] + [f"Cl_span_{loc:.4f}" for loc in span_locations]
+        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm"] + [f"Cl_span_{loc:.4f}" for loc in span_locations] + ["Oswald_efficiency"]
 
-        # Combine  sweep results with local spanwise results
+        # Combine sweep results with local spanwise results
         aero_results = []
         for i, alpha in enumerate(alphas):
+            e = [compute_oswald(CL[i], CDi[i], Sref, bref)]
             base_row = [v, alpha, CL[i], CD[i], Cm[i]]
             # Safely find the corresponding AoA in the parsed dictionary to avoid errors
             closest_aoa_key = min(cl_data.keys(), key=lambda k: abs(k - alpha))
             spanwise_cls = cl_data[closest_aoa_key]['Cl']
-            full_row = base_row + spanwise_cls
+            full_row = base_row + spanwise_cls + e
             aero_results.append(full_row)
 
         # Write to CSV
         aero_filename = "cfd_sweep.csv"
-        with open(aero_filename, 'w', newline='') as f:
+        with open(aero_filename, 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(aero_headers)
+            if not csv_exists:
+                writer.writerow(aero_headers)
+                csv_exists = True
             writer.writerows(aero_results)
 
         # File Cleanup
@@ -266,8 +271,8 @@ def vsp_sweep(vsp3_path, velocity, Sref, bref, cref):
     subprocess.run([vsp_exe, "-script", script_path], check=True)
     os.remove(script_path)
 
-    CL, CD, Cm = parse_polar("plane.polar")
-    return CL, CD, Cm
+    CL, CD, CDi, Cm = parse_polar("plane.polar")
+    return CL, CD, CDi, Cm
 
 def vsp_stability(vsp3_path, velocity, Sref, bref, cref):
     mach = velocity / 343.0
@@ -321,7 +326,7 @@ def vsp_stability(vsp3_path, velocity, Sref, bref, cref):
     os.remove(script_path)
 
 def parse_polar(polar_path):
-    CL, CD, Cm = [], [], []
+    CL, CD, CDi, Cm = [], [], [], []
     col_cl = col_cd = col_cm = None
 
     with open(polar_path, 'r') as f:
@@ -333,6 +338,7 @@ def parse_polar(polar_path):
             if tokens[0] == 'Beta':
                 col_cl = tokens.index('CLtot')
                 col_cd = tokens.index('CDtot')
+                col_cdi = tokens.index('CDi')
                 col_cm = tokens.index('CMytot')
                 continue
             if col_cl is None:
@@ -340,11 +346,12 @@ def parse_polar(polar_path):
             try:
                 CL.append(float(tokens[col_cl]))
                 CD.append(float(tokens[col_cd]))
+                CDi.append(float(tokens[col_cdi]))
                 Cm.append(float(tokens[col_cm]))
             except (ValueError, IndexError):
                 continue
 
-    return CL, CD, Cm
+    return CL, CD, CDi, Cm
 
 def read_stability(stab_path, output_file="vsp_derivatives.csv"): 
     col_alpha = col_beta = col_p = col_q = col_r = None
@@ -441,6 +448,17 @@ def read_lift_distribution(filepath, target_vortex_sheet=1):
                         pass
                         
     return data_by_aoa
+
+def compute_oswald(cl, cdi, s, b):
+    AR = (b ** 2) / s
+    cl_array = np.array(cl, dtype=float)
+    cdi_array = np.array(cdi, dtype=float)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        e = (cl_array ** 2) / (np.pi * AR * cdi_array)
+        e = np.where(np.isfinite(e), e, 0.0)
+    if e.ndim == 0:
+        return float(e)
+    return e
     
 # AngelScript array literal helpers
 def iarr(v):
