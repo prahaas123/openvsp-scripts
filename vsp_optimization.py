@@ -14,7 +14,7 @@ wing_chord_res = 50
 velocity = 15 # m/s
 alpha = 3 # degrees AoA
 
-airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\mh45.dat"
+airfoil_file = r"Airfoils\mh45.dat"
 
 MAX_WEIGHT = 3   # Newtons
 MIN_S_REF = 0.1  # m2

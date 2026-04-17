@@ -13,7 +13,7 @@ velocity = 10 # m/s
 alpha = 0 # degrees AoA
 SM = 0.10  # Desired Static Margin
  
-airfoil_file = r"C:\Users\kprah\Desktop\Prahaas\WatArrow\CFD Automation\Airfoils\goe322.dat"
+airfoil_file = r"Airfoils\goe322.dat"
  
 moment_tolerance = 0.05
 tail_sizing_iterations = 10
