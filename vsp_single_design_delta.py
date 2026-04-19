@@ -1,21 +1,21 @@
 import os
+import openvsp as vsp
 import pyvista as pv
 import numpy as np
 import pandas as pd
 import csv
 import glob
-import subprocess
 import plotly.graph_objects as go
 import plotly.express as px
 from dash import Dash, dcc, html, Input, Output
-import dash_bootstrap_components as dbc
+# import dash_bootstrap_components as dbc
 
 vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 20
 wing_chord_res = 50
-velocities = list(range(10, 50, 5)) # m/s
-alphas = list(range(-5, 15, 1)) # degrees AoA
+velocities = list(range(10, 25, 5)) # m/s
+alphas = list(range(-5, 15, 3)) # degrees AoA
 
 airfoil_file = r"Airfoils\mh45.dat"
 
@@ -45,25 +45,22 @@ def main():
     for v in velocities:
         print(f"\n=== Running VSP Aero Sweep at {v} m/s ===")
         stl_path, vsp3_path = generate_wing("wing")
-        CL, CD, CDi, Cm = vsp_sweep(vsp3_path, v, Sref, bref, cref)
-        lod_filename = "wing.lod"
-        cl_data = read_lift_distribution(lod_filename)
+        CL, CD, CDi, Cm, load_res = vsp_sweep(vsp3_path, v, Sref, bref, cref)
+        cl_data = read_lift_distribution(load_res)
         first_aoa_key = list(cl_data.keys())[0]
         span_locations = cl_data[first_aoa_key]['SoverB']
-        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm"] + [f"Cl_span_{loc:.4f}" for loc in span_locations] + ["Oswald_efficiency"]
+        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm"] + [f"Cl_span_{loc:.4f}" for loc in span_locations[0]] + ["Oswald_efficiency"]
 
         # Combine sweep results with local spanwise results
         aero_results = []
         for i, alpha in enumerate(alphas):
             e = [compute_oswald(CL[i], CDi[i], Sref, bref)]
             base_row = [v, alpha, CL[i], CD[i], Cm[i]]
-            # Safely find the corresponding AoA in the parsed dictionary to avoid errors
             closest_aoa_key = min(cl_data.keys(), key=lambda k: abs(k - alpha))
-            spanwise_cls = cl_data[closest_aoa_key]['Cl']
-            full_row = base_row + spanwise_cls + e
+            spanwise_cls = cl_data[closest_aoa_key]['Cl'][0]
+            full_row = base_row + list(spanwise_cls) + e
             aero_results.append(full_row)
 
-        # Write to CSV
         aero_filename = "aero_full.csv"
         with open(aero_filename, 'a', newline='') as f:
             writer = csv.writer(f)
@@ -72,7 +69,7 @@ def main():
                 csv_exists = True
             writer.writerows(aero_results)
 
-        # File Cleanup
+        os.remove("w")
         for filename in glob.glob("wing*"):
             try:
                 os.remove(filename)
@@ -84,9 +81,9 @@ def main():
     
     for v in velocities:
         stl_path, vsp3_path = generate_wing("wing")
-        vsp_stability(vsp3_path, v, Sref, bref, cref)
-        stab_dict = read_stability("wing.stab")
-        sm = get_sm("wing.stab", cg=x_cg, mac=cref)
+        stab_results = vsp_stability(vsp3_path, v, Sref, bref, cref)
+        stab_dict = read_stability(stab_results)
+        sm = get_sm(stab_results)
         
         stability_filename = "stability.csv"
         stab_headers = ["Velocity"] + list(stab_dict.keys()) + ["StaticMargin"]
@@ -99,6 +96,7 @@ def main():
                 stab_csv_exists = True
             writer.writerow(stab_columns)
 
+        os.remove("w")
         for filename in glob.glob("wing*"):
             try:
                 os.remove(filename)
@@ -109,54 +107,40 @@ def generate_wing(wing_name):
     tip_chord = root_chord * taper_ratio
     airfoil_fwd = airfoil_file.replace("\\", "/")
 
-    script_lines = [
-        "void main() {",
-        "    VSPCheckSetup();",
-        "    ClearVSPModel();",
-        f'    string wing_id = AddGeom( "WING" );',
-        f'    SetParmVal( wing_id, "TotalSpan",      "WingGeom", {span} );',
-        f'    SetParmVal( wing_id, "Root_Chord",     "XSec_1",   {root_chord} );',
-        f'    SetParmVal( wing_id, "Tip_Chord",      "XSec_1",   {tip_chord} );',
-        f'    SetParmVal( wing_id, "Sweep",          "XSec_1",   {sweep} );',
-        f'    SetParmVal( wing_id, "Dihedral",       "XSec_1",   {dihedral} );',
-        f'    SetParmVal( wing_id, "Twist",          "XSec_1",   {twist} );',
-        f'    SetParmVal( wing_id, "Twist_Location", "XSec_1",   1.0 );',
-        f'    SetParmVal( wing_id, "SectTess_U",     "XSec_1",   {wing_span_res}.0 );',
-        f'    SetParmVal( wing_id, "Tess_W",         "Shape",    {wing_chord_res}.0 );',
-        f'    string root_surf = GetXSecSurf( wing_id, 0 );',
-        f'    ChangeXSecShape( root_surf, 0, XS_FILE_AIRFOIL );',
-        f'    string root_xsec = GetXSec( root_surf, 0 );',
-        f'    ReadFileAirfoil( root_xsec, "{airfoil_fwd}" );',
-        f'    string tip_surf = GetXSecSurf( wing_id, 1 );',
-        f'    ChangeXSecShape( tip_surf, 1, XS_FILE_AIRFOIL );',
-        f'    string tip_xsec = GetXSec( tip_surf, 1 );',
-        f'    ReadFileAirfoil( tip_xsec, "{airfoil_fwd}" );',
-        f'    SetSetFlag( wing_id, 1, true );',
-        f'    AddSubSurf( wing_id, SS_CONTROL );',
-        f'    SetParmVal( wing_id, "SE_Const_Flag",  "SS_Control_1", 1.0 );',
-        f'    SetParmVal( wing_id, "Length_C_Start", "SS_Control_1", {elevon_length} );',
-        f'    SetParmVal( wing_id, "EtaFlag",        "SS_Control_1", 1.0 );',
-        f'    SetParmVal( wing_id, "EtaStart",       "SS_Control_1", {elevon_start} );',
-        f'    SetParmVal( wing_id, "EtaEnd",         "SS_Control_1", {elevon_end} );',
-        f'    Update();',
-        f'    WriteVSPFile( "{wing_name}.vsp3", SET_ALL );',
-        f'    ExportFile( "{wing_name}.stl", 0, EXPORT_STL );',
-        "}",
-    ]
+    vsp.VSPCheckSetup()
+    vsp.ClearVSPModel()
+    wing_id = vsp.AddGeom( "WING" )
+    vsp.SetParmVal( wing_id, "TotalSpan",      "WingGeom", span)
+    vsp.SetParmVal( wing_id, "Root_Chord",     "XSec_1",   root_chord)
+    vsp.SetParmVal( wing_id, "Tip_Chord",      "XSec_1",   tip_chord)
+    vsp.SetParmVal( wing_id, "Sweep",          "XSec_1",   sweep)
+    vsp.SetParmVal( wing_id, "Dihedral",       "XSec_1",   dihedral)
+    vsp.SetParmVal( wing_id, "Twist",          "XSec_1",   twist)
+    vsp.SetParmVal( wing_id, "Twist_Location", "XSec_1",   1.0 )
+    vsp.SetParmVal( wing_id, "SectTess_U",     "XSec_1",   wing_span_res)
+    vsp.SetParmVal( wing_id, "Tess_W",         "Shape",    wing_chord_res)
+    
+    # Airfoil selection    
+    root_xsec_surf = vsp.GetXSecSurf(wing_id, 0)
+    vsp.ChangeXSecShape(root_xsec_surf, 0, vsp.XS_FILE_AIRFOIL)
+    root_xsec = vsp.GetXSec(root_xsec_surf, 0)
+    vsp.ReadFileAirfoil(root_xsec, airfoil_file)
+    
+    tip_xsec_surf = vsp.GetXSecSurf(wing_id, 1)
+    vsp.ChangeXSecShape(tip_xsec_surf, 1, vsp.XS_FILE_AIRFOIL)
+    tip_xsec = vsp.GetXSec(tip_xsec_surf, 1)
+    vsp.ReadFileAirfoil(tip_xsec, airfoil_file)
+    
+    vsp.SetSetFlag(wing_id, 1, True)
 
-    script_path = f"{wing_name}_geom.vspscript"
-    with open(script_path, 'w') as f:
-        f.write("\n".join(script_lines))
-
-    print(f"--- Running geometry generation ({script_path}) ---")
-    subprocess.run([vsp_exe, "-script", script_path], check=True)
-    os.remove(script_path)
-
+    # Finalize and export
+    vsp.Update()
     stl_path = f"{wing_name}.stl"
-    vsp3_path = f"{wing_name}.vsp3"
-    print(f"STL generated: {stl_path}")
-    print(f"VSP file saved: {vsp3_path}")
-    return stl_path, vsp3_path
+    analysis_path = f"{wing_name}.vsp3"
+    vsp.WriteVSPFile(analysis_path)
+    vsp.ExportFile(stl_path, 0, vsp.EXPORT_STL)
+
+    return stl_path, analysis_path
 
 def visualize_stl(stl_path):
     if os.path.exists(stl_path):
@@ -173,216 +157,128 @@ def visualize_stl(stl_path):
 def vsp_sweep(vsp3_path, v, Sref, bref, cref):
     mach = v / 343.0
 
-    script_lines = [
-        "void main() {",
-        f'    ClearVSPModel();',
-        f'    ReadVSPFile( "{vsp3_path}" );',
-        f'    SetAnalysisInputDefaults( "VSPAEROComputeGeometry" );',
-        f'    array< int > thick_set = GetIntAnalysisInput( "VSPAEROComputeGeometry", "GeomSet" );',
-        f'    array< int > thin_set = GetIntAnalysisInput( "VSPAEROComputeGeometry", "ThinGeomSet" );',
-        f'    thick_set[0] = ( SET_TYPE::SET_NONE );',
-        f'    thin_set[0] = ( SET_TYPE::SET_ALL );',
-        f'    SetIntAnalysisInput( "VSPAEROComputeGeometry", "GeomSet", thick_set );',
-        f'    SetIntAnalysisInput( "VSPAEROComputeGeometry", "ThinGeomSet", thin_set );',
-        f'    Print( "--- Running Meshing ---" );',
-        f'    ExecAnalysis( "VSPAEROComputeGeometry" );',
-        f'    SetAnalysisInputDefaults( "VSPAEROSweep" );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Sref",        {darr(Sref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "cref",        {darr(cref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "bref",        {darr(bref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaStart",  {darr(float(alphas[0]))}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaEnd",    {darr(float(alphas[-1]))}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "AlphaNpts",   {iarr(len(alphas))}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "MachStart",   {darr(float(mach))}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "MachNpts",    {iarr(1)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Vinf",        {darr(v)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Rho",         {darr(1.225)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Xcg",         {darr(x_cg)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "WakeNumIter", {iarr(15)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "NCPU",        {iarr(8)}, 0 );',
-        f'    Print( "--- Running Aero Sweep ---" );',
-        f'    SetStringAnalysisInput( "VSPAEROSweep", "RedirectFile", array<string> = {{"{vsp3_path}_log.txt"}}, 0 );',
-        f'    ExecAnalysis( "VSPAEROSweep" );',
-        "}",
-    ]
+    # Meshing    
+    vsp.ClearVSPModel()
+    vsp.ReadVSPFile(vsp3_path)
+    geom_analysis = "VSPAEROComputeGeometry"
+    vsp.SetAnalysisInputDefaults(geom_analysis)
+    vsp.SetIntAnalysisInput(geom_analysis, "GeomSet", [vsp.SET_NONE])      
+    vsp.SetIntAnalysisInput(geom_analysis, "ThinGeomSet", [vsp.SET_ALL])
+    vsp.ExecAnalysis(geom_analysis)
+    
+    # Aero Analysis
+    aero_analysis = "VSPAEROSweep"
+    vsp.SetAnalysisInputDefaults(aero_analysis)
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Sref", [Sref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "cref", [cref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "bref", [bref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "AlphaStart", [alphas[0]])
+    vsp.SetIntAnalysisInput(aero_analysis, "AlphaNpts", [len(alphas)])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "AlphaEnd", [alphas[-1]])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "MachStart", [mach])
+    vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
+    vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [6]) 
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [v])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
+    vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
+    vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", f"{vsp3_path}_log.txt")
+    rid = vsp.ExecAnalysis(aero_analysis)
 
-    script_path = "wing_sweep.vspscript"
-    with open(script_path, 'w') as f:
-        f.write("\n".join(script_lines))
+    # Results
+    polar_res = vsp.FindLatestResultsID("VSPAERO_Polar")
+    load_res = vsp.FindLatestResultsID("VSPAERO_Load")
+    cl = vsp.GetDoubleResults(polar_res, "CLtot")
+    cd = vsp.GetDoubleResults(polar_res, "CDtot")
+    cdi = vsp.GetDoubleResults(polar_res, "CDi")
+    cm = vsp.GetDoubleResults(polar_res, "CMytot")
+    return cl, cd, cdi, cm, load_res
 
-    print(f"--- Running aero sweep ({script_path}) ---")
-    subprocess.run([vsp_exe, "-script", script_path], check=True)
-    os.remove(script_path)
+def vsp_stability(vsp3_path, v, Sref, bref, cref):    
+    # Load model
+    vsp.ReadVSPFile(vsp3_path)
+    geom_analysis = "VSPAEROComputeGeometry"
+    vsp.SetAnalysisInputDefaults(geom_analysis)
+    vsp.SetIntAnalysisInput(geom_analysis, "GeomSet", [vsp.SET_NONE])      
+    vsp.SetIntAnalysisInput(geom_analysis, "ThinGeomSet", [vsp.SET_SHOWN])
+    
+    # Control surfaces
+    cs_pitch_id = vsp.CreateVSPAEROControlSurfaceGroup() # Pitch
+    vsp.SetVSPAEROControlGroupName("Pitch", cs_pitch_id)
+    vsp.AddAllToVSPAEROControlSurfaceGroup(cs_pitch_id)
+    cs_roll_id = vsp.CreateVSPAEROControlSurfaceGroup() # Roll
+    vsp.SetVSPAEROControlGroupName("Roll", cs_roll_id)
+    vsp.AddAllToVSPAEROControlSurfaceGroup(cs_roll_id)
+    vsp.Update()
+    group_pitch_str = f"ControlSurfaceGroup_{cs_pitch_id + 1}"
+    container_id = vsp.FindContainer("VSPAEROSettings", 0)
+    wing_id = vsp.FindGeoms()[0]
+    cs_id = vsp.GetSubSurf(wing_id, 0)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", group_pitch_str), -1)
+    vsp.ExecAnalysis(geom_analysis)
 
-    CL, CD, CDi, Cm = parse_polar("wing.polar")
-    return CL, CD, CDi, Cm
-
-def vsp_stability(vsp3_path, v, Sref, bref, cref):
+    # Stability Sweep
+    aero_analysis = "VSPAEROSweep"
+    vsp.SetAnalysisInputDefaults(aero_analysis)
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Sref", [Sref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "cref", [cref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "bref", [bref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "AlphaStart", [0.0])
+    vsp.SetIntAnalysisInput(aero_analysis, "AlphaNpts", [1])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "AlphaEnd", [0.0])
     mach = v / 343.0
+    vsp.SetDoubleAnalysisInput(aero_analysis, "MachStart", [mach])
+    vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
+    vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [6]) 
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [100.0])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
+    vsp.SetIntAnalysisInput(aero_analysis, "UnsteadyType", [1])
+    vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
+    vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", f"{vsp3_path}_log.txt")
+    vsp.ExecAnalysis(aero_analysis)
+    
+    stab_results = vsp.FindLatestResultsID("VSPAERO_Stab")
+    return stab_results
 
-    script_lines = [
-        "void main() {",
-        f'    ReadVSPFile( "{vsp3_path}" );',
-        f'    SetAnalysisInputDefaults( "VSPAEROComputeGeometry" );',
-        f'    array< int > thick_set = GetIntAnalysisInput( "VSPAEROComputeGeometry", "GeomSet" );',
-        f'    array< int > thin_set = GetIntAnalysisInput( "VSPAEROComputeGeometry", "ThinGeomSet" );',
-        f'    thick_set[0] = ( SET_TYPE::SET_NONE );',
-        f'    thin_set[0] = ( SET_TYPE::SET_ALL );',
-        f'    int cs_pitch_id = CreateVSPAEROControlSurfaceGroup();',
-        f'    SetVSPAEROControlGroupName( "Pitch", cs_pitch_id );',
-        f'    AddAllToVSPAEROControlSurfaceGroup( cs_pitch_id );',
-        f'    int cs_roll_id = CreateVSPAEROControlSurfaceGroup();',
-        f'    SetVSPAEROControlGroupName( "Roll", cs_roll_id );',
-        f'    AddAllToVSPAEROControlSurfaceGroup( cs_roll_id );',
-        f'    Update();',
-        f'    string container_id = FindContainer( "VSPAEROSettings", 0 );',
-        f'    array<string> geoms = FindGeoms();',
-        f'    string wid = geoms[0];',
-        f'    string cs_id = GetSubSurf( wid, 0 );',
-        f'    string group_str = "ControlSurfaceGroup_" + formatInt( cs_pitch_id + 1, "" );',
-        f'    string parm_id = FindParm( container_id, "Surf_" + cs_id + "_1_Gain", group_str );',
-        f'    SetParmVal( parm_id, -1.0 );',
-        f'    Print( "--- Running Meshing (stability) ---" );',
-        f'    ExecAnalysis( "VSPAEROComputeGeometry" );',
-        f'    SetAnalysisInputDefaults( "VSPAEROSweep" );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Sref",         {darr(Sref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "cref",         {darr(cref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "bref",         {darr(bref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaStart",   {darr(0.0)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaEnd",     {darr(0.0)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "AlphaNpts",    {iarr(1)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "MachStart",    {darr(mach)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "MachNpts",     {iarr(1)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Vinf",         {darr(100.0)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Xcg",          {darr(x_cg)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "WakeNumIter",  {iarr(15)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "UnsteadyType", {iarr(1)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "NCPU",         {iarr(8)}, 0 );',
-        f'    Print( "--- Running Stability Sweep ---" );',
-        f'    SetStringAnalysisInput( "VSPAEROSweep", "RedirectFile", array<string> = {{"{vsp3_path}_log.txt"}}, 0 );',
-        f'    ExecAnalysis( "VSPAEROSweep" );',
-        "}",
-    ]
-
-    script_path = "wing_stab.vspscript"
-    with open(script_path, 'w') as f:
-        f.write("\n".join(script_lines))
-
-    print(f"--- Running stability sweep ({script_path}) ---")
-    subprocess.run([vsp_exe, "-script", script_path], check=True)
-    os.remove(script_path)
-
-def parse_polar(polar_path):
-    CL, CD, CDi, Cm = [], [], [], []
-    col_cl = col_cd = col_cdi = col_cm = None
- 
-    with open(polar_path, 'r') as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped or stripped.startswith('#'):
-                continue
-            tokens = stripped.split()
-            if tokens[0] == 'Beta':
-                col_cl   = tokens.index('CLtot')
-                col_cd   = tokens.index('CDtot')
-                col_cdi  = tokens.index('CDi')
-                col_cm   = tokens.index('CMytot')
-                continue
-            if col_cl is None:
-                continue
-            try:
-                CL.append(float(tokens[col_cl]))
-                CD.append(float(tokens[col_cd]))
-                CDi.append(float(tokens[col_cdi]))
-                Cm.append(float(tokens[col_cm]))
-            except (ValueError, IndexError):
-                continue
- 
-    return CL, CD, CDi, Cm
-
-def read_stability(stab_path, output_file="stability.csv"):
-    col_alpha = col_beta = col_p = col_q = col_r = col_pitch = col_roll = None
-    rows = {}
- 
-    with open(stab_path, 'r') as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped or stripped.startswith('#'):
-                continue
-            tokens = stripped.split()
-            if tokens[0] == 'Coef':
-                col_alpha = tokens.index('Alpha')
-                col_beta  = tokens.index('Beta')
-                col_p     = tokens.index('p')
-                col_q     = tokens.index('q')
-                col_r     = tokens.index('r')
-                col_pitch = tokens.index('ConGrp_1')
-                col_roll  = tokens.index('ConGrp_2')
-                continue
-            if col_alpha is None:
-                continue
-            coef = tokens[0]
-            if coef in ('CL', 'CS', 'CMl', 'CMm', 'CMn', 'CD'):
-                try:
-                    rows[coef] = [float(tokens[col_alpha]),
-                                  float(tokens[col_beta]),
-                                  float(tokens[col_p]),
-                                  float(tokens[col_q]),
-                                  float(tokens[col_r]),
-                                  float(tokens[col_pitch]),
-                                  float(tokens[col_roll])]
-                except (ValueError, IndexError):
-                    pass
- 
+def read_stability(stab_res):
     vsp_dict = {}
-    if 'CL'  in rows: vsp_dict['CL_de']   = rows['CL'] [5]  # CL   wrt ConGrp_1 (pitch)
-    if 'CS'  in rows: vsp_dict['CY_beta'] = rows['CS'] [1]  # CS   wrt Beta
-    if 'CS'  in rows: vsp_dict['CY_p']    = rows['CS'] [2]  # CS   wrt p
-    if 'CS'  in rows: vsp_dict['CY_r']    = rows['CS'] [4]  # CS   wrt r
-    if 'CMl' in rows: vsp_dict['Cl_beta'] = rows['CMl'][1]  # CMl  wrt Beta
-    if 'CMl' in rows: vsp_dict['Cl_p']    = rows['CMl'][2]  # CMl  wrt p
-    if 'CMl' in rows: vsp_dict['Cl_r']    = rows['CMl'][4]  # CMl  wrt r
-    if 'CMl' in rows: vsp_dict['Cl_da']   = rows['CMl'][6]  # CMl  wrt ConGrp_2 (roll)
-    if 'CMm' in rows: vsp_dict['Cm_q']    = rows['CMm'][3]  # CMm  wrt q
-    if 'CMm' in rows: vsp_dict['Cm_de']   = rows['CMm'][5]  # CMm  wrt ConGrp_1 (pitch)
-    if 'CMn' in rows: vsp_dict['Cn_beta'] = rows['CMn'][1]  # CMn  wrt Beta
-    if 'CMn' in rows: vsp_dict['Cn_p']    = rows['CMn'][2]  # CMn  wrt p
-    if 'CMn' in rows: vsp_dict['Cn_r']    = rows['CMn'][4]  # CMn  wrt r
-    if 'CMn' in rows: vsp_dict['Cn_da']   = rows['CMn'][6]  # CMn  wrt ConGrp_2 (roll)
- 
+    
+    # Stability Derivatives
+    vsp_dict["Cm_alpha"] = vsp.GetDoubleResults(stab_res, "Alpha_CMm")[0] # Longitudinal Static Stability (C_m_alpha)
+    vsp_dict["Cn_beta"]  = vsp.GetDoubleResults(stab_res, "Beta_CMn")[0] # Directional Static Stability (C_n_beta)
+    vsp_dict["Cl_beta"]  = vsp.GetDoubleResults(stab_res, "Beta_CMl")[0] # Lateral Static Stability / Dihedral Effect (C_l_beta)
+    vsp_dict["Cm_q"]     = vsp.GetDoubleResults(stab_res, "Pitch_Rate_CMm")[0] # Pitch Damping (C_m_q)
+    vsp_dict["Cn_r"]     = vsp.GetDoubleResults(stab_res, "Yaw___Rate_CMn")[0] # Yaw Damping (C_n_r)
+    vsp_dict["Cl_p"]     = vsp.GetDoubleResults(stab_res, "Roll__Rate_CMl")[0] # Roll Damping (C_l_p)
+    vsp_dict["Cl_r"]     = vsp.GetDoubleResults(stab_res, "Yaw___Rate_CMl")[0] # Roll due to Yaw Rate (C_l_r) - Major Dutch Roll contributor
+    vsp_dict["Cn_p"]     = vsp.GetDoubleResults(stab_res, "Roll__Rate_CMn")[0] # Yaw due to Roll Rate (C_n_p)
+
+    # Control Derivatives (Safely fall back to 0.0 if geometry is missing)
+    try:
+        vsp_dict["Cm_de"] = vsp.GetDoubleResults(stab_res, "Pitch_CMm")[0] # Elevator Authority (C_m_de)
+    except IndexError:
+        vsp_dict["Cm_de"] = 0.0
+
+    try:
+        vsp_dict["Cl_da"] = vsp.GetDoubleResults(stab_res, "Roll_CMl")[0] # Aileron Authority (C_l_da)
+    except IndexError:
+        vsp_dict["Cl_da"] = 0.0
+
+    try:
+        vsp_dict["Cn_da"] = vsp.GetDoubleResults(stab_res, "Roll_CMn")[0] # Adverse Yaw (C_n_da)
+    except IndexError:
+        vsp_dict["Cn_da"] = 0.0
+
     return vsp_dict
     
-def read_lift_distribution(filepath, target_vortex_sheet=1):
+def read_lift_distribution(load_result, target_vortex_sheet=1):
     data_by_aoa = {}
-    current_aoa = None
-    
-    with open(filepath, 'r') as file:
-        for line in file:
-            line = line.strip()
-            if not line:
-                continue
-                
-            if line.startswith("AoA_"):
-                parts = line.split()
-                current_aoa = float(parts[1])
-                
-                if current_aoa not in data_by_aoa:
-                    data_by_aoa[current_aoa] = {'SoverB': [], 'Cl': []}
-            
-            else:
-                parts = line.split()
-                if len(parts) > 15:
-                    try:
-                        vortex_sheet = int(parts[1])
-                        if vortex_sheet == target_vortex_sheet and current_aoa is not None:
-                            soverb = float(parts[7])
-                            cl = float(parts[11])
-                            data_by_aoa[current_aoa]['SoverB'].append(soverb)
-                            data_by_aoa[current_aoa]['Cl'].append(cl)
-                            
-                    except ValueError:
-                        pass
-                        
+    current_aoa = vsp.GetDoubleResults(load_result, "Angle ")[0]
+    if current_aoa not in data_by_aoa:
+        data_by_aoa[current_aoa] = {'SoverB': [], 'Cl': []}
+        soverb = vsp.GetDoubleResults(load_result, "SoverB")
+        cl = vsp.GetDoubleResults(load_result, "cl*c/cref")
+        data_by_aoa[current_aoa]['SoverB'].append(soverb)
+        data_by_aoa[current_aoa]['Cl'].append(cl)         
     return data_by_aoa
 
 def compute_oswald(cl, cdi, s, b):
@@ -396,29 +292,8 @@ def compute_oswald(cl, cdi, s, b):
         return float(e)
     return e
     
-def get_sm(stab_path, cg=x_cg, mac=1.0):
-    with open(stab_path, 'r') as f:
-        for line in f:
-            stripped = line.strip()
-            
-            if stripped.startswith('X_np'):
-                parts = stripped.split()
-                try:
-                    np_val = float(parts[1])
-                    sm = (np_val - cg) / mac
-                    return sm
-                    
-                except (ValueError, IndexError):
-                    return float('nan')
-                    
-    return float('nan')
-
-# AngelScript array helpers
-def iarr(v):
-    return f"array<int> = {{{v}}}"
-
-def darr(v):
-    return f"array<double> = {{{v}}}"
+def get_sm(stab_res):
+    return vsp.GetDoubleResults(stab_res, "SM")[0]
 
 def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     # --- Data Loading & Pre-processing ---
@@ -574,6 +449,6 @@ def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     return app
 
 if __name__ == '__main__':
-    # main()
-    app = plot_dashboards()
-    app.run(debug=True)
+    main()    
+    # app = plot_dashboards()
+    # app.run(debug=True)
