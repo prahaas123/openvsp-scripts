@@ -1,6 +1,6 @@
 import os
+import openvsp as vsp
 import csv
-import subprocess
 import pyvista as pv
 import numpy as np
 import glob
@@ -119,8 +119,7 @@ def evaluate_aero_objective(x):
         stl_path, analysis_path = generate_wing(run_id, span, root_chord, taper, sweep, 0.0, twist, airfoil_file)
         Sref = 0.5 * (root_chord + root_chord * taper) * span
         x_cg = calc_cg(root_chord, taper, span, sweep)
-        aero  = vsp_point(analysis_path, velocity, alpha, Sref, span, root_chord, x_cg)
-        CL, CD, LD, CM_cg = aero["CL"], aero["CD"], aero["LD"], aero["CM"]
+        CL, CD, LD, CM_cg  = vsp_point(analysis_path, velocity, alpha, Sref, span, root_chord, x_cg)
         lift  = 0.5 * CL * 1.225 * velocity**2 * Sref
         AR    = aspect_ratio(root_chord, taper, span)
         
@@ -160,6 +159,7 @@ def evaluate_aero_objective(x):
         print(f"Run {run_id} failed: {e}")
         return 1e10 # Massive penalty for crashed runs
     finally:
+        os.remove("w")
         for filename in glob.glob(f"{run_id}*"):
             try:
                 os.remove(filename)
@@ -170,48 +170,40 @@ def generate_wing(wing_name, wingspan, root_chord, taper_ratio, sweep_angle, dih
     tip_chord = root_chord * taper_ratio
     airfoil_fwd = airfoil_file.replace("\\", "/")
 
-    script_lines = [
-        "void main() {",
-        "    VSPCheckSetup();",
-        "    ClearVSPModel();",
-        f'    string wing_id = AddGeom( "WING" );',
-        f'    SetParmVal( wing_id, "TotalSpan",      "WingGeom", {wingspan} );',
-        f'    SetParmVal( wing_id, "Root_Chord",     "XSec_1",   {root_chord} );',
-        f'    SetParmVal( wing_id, "Tip_Chord",      "XSec_1",   {tip_chord} );',
-        f'    SetParmVal( wing_id, "Sweep",          "XSec_1",   {sweep_angle} );',
-        f'    SetParmVal( wing_id, "Dihedral",       "XSec_1",   {dihedral_angle} );',
-        f'    SetParmVal( wing_id, "Twist",          "XSec_1",   {twist_angle} );',
-        f'    SetParmVal( wing_id, "Twist_Location", "XSec_1",   1.0 );',
-        f'    SetParmVal( wing_id, "SectTess_U",     "XSec_1",   {wing_span_res}.0 );',
-        f'    SetParmVal( wing_id, "Tess_W",         "Shape",    {wing_chord_res}.0 );',
-        f'    string root_surf = GetXSecSurf( wing_id, 0 );',
-        f'    ChangeXSecShape( root_surf, 0, XS_FILE_AIRFOIL );',
-        f'    string root_xsec = GetXSec( root_surf, 0 );',
-        f'    ReadFileAirfoil( root_xsec, "{airfoil_fwd}" );',
-        f'    string tip_surf = GetXSecSurf( wing_id, 1 );',
-        f'    ChangeXSecShape( tip_surf, 1, XS_FILE_AIRFOIL );',
-        f'    string tip_xsec = GetXSec( tip_surf, 1 );',
-        f'    ReadFileAirfoil( tip_xsec, "{airfoil_fwd}" );',
-        f'    SetSetFlag( wing_id, 1, true );',
-        f'    Update();',
-        f'    WriteVSPFile( "{wing_name}.vsp3", SET_ALL );',
-        f'    ExportFile( "{wing_name}.stl", 0, EXPORT_STL );',
-        "}",
-    ]
+    vsp.VSPCheckSetup()
+    vsp.ClearVSPModel()
+    wing_id = vsp.AddGeom( "WING" )
+    vsp.SetParmVal( wing_id, "TotalSpan",      "WingGeom", wingspan )
+    vsp.SetParmVal( wing_id, "Root_Chord",     "XSec_1",   root_chord )
+    vsp.SetParmVal( wing_id, "Tip_Chord",      "XSec_1",   tip_chord )
+    vsp.SetParmVal( wing_id, "Sweep",          "XSec_1",   sweep_angle )
+    vsp.SetParmVal( wing_id, "Dihedral",       "XSec_1",   dihedral_angle )
+    vsp.SetParmVal( wing_id, "Twist",          "XSec_1",   twist_angle )
+    vsp.SetParmVal( wing_id, "Twist_Location", "XSec_1",   1.0 )
+    vsp.SetParmVal( wing_id, "SectTess_U",     "XSec_1",   wing_span_res )
+    vsp.SetParmVal( wing_id, "Tess_W",         "Shape",    wing_chord_res )
+    
+    # Airfoil selection    
+    root_xsec_surf = vsp.GetXSecSurf(wing_id, 0)
+    vsp.ChangeXSecShape(root_xsec_surf, 0, vsp.XS_FILE_AIRFOIL)
+    root_xsec = vsp.GetXSec(root_xsec_surf, 0)
+    vsp.ReadFileAirfoil(root_xsec, airfoil_file)
+    
+    tip_xsec_surf = vsp.GetXSecSurf(wing_id, 1)
+    vsp.ChangeXSecShape(tip_xsec_surf, 1, vsp.XS_FILE_AIRFOIL)
+    tip_xsec = vsp.GetXSec(tip_xsec_surf, 1)
+    vsp.ReadFileAirfoil(tip_xsec, airfoil_file)
+    
+    vsp.SetSetFlag(wing_id, 1, True)
 
-    script_path = f"{wing_name}_geom.vspscript"
-    with open(script_path, 'w') as f:
-        f.write("\n".join(script_lines))
-
-    print(f"--- Running geometry generation ({script_path}) ---")
-    subprocess.run([vsp_exe, "-script", script_path], check=True)
-    os.remove(script_path)
-
+    # Finalize and export
+    vsp.Update()
     stl_path = f"{wing_name}.stl"
-    vsp3_path = f"{wing_name}.vsp3"
-    print(f"STL generated: {stl_path}")
-    print(f"VSP file saved: {vsp3_path}")
-    return stl_path, vsp3_path
+    analysis_path = f"{wing_name}.vsp3"
+    vsp.WriteVSPFile(analysis_path)
+    vsp.ExportFile(stl_path, 0, vsp.EXPORT_STL)
+
+    return stl_path, analysis_path
 
 def visualize_stl(stl_path):
     if os.path.exists(stl_path):
@@ -228,83 +220,39 @@ def visualize_stl(stl_path):
 def vsp_point(vsp3_path, vin, alpha, Sref, bref, cref, x_cg):
     mach = vin / 343.0
 
-    script_lines = [
-        "void main() {",
-        f'    ClearVSPModel();',
-        f'    ReadVSPFile( "{vsp3_path}" );',
-        f'    SetAnalysisInputDefaults( "VSPAEROComputeGeometry" );',
-        f'    array< int > thick_set = GetIntAnalysisInput( "VSPAEROComputeGeometry", "GeomSet" );',
-        f'    array< int > thin_set = GetIntAnalysisInput( "VSPAEROComputeGeometry", "ThinGeomSet" );',
-        f'    thick_set[0] = ( SET_TYPE::SET_NONE );',
-        f'    thin_set[0] = ( SET_TYPE::SET_ALL );',
-        f'    SetIntAnalysisInput( "VSPAEROComputeGeometry", "GeomSet", thick_set );',
-        f'    SetIntAnalysisInput( "VSPAEROComputeGeometry", "ThinGeomSet", thin_set );',
-        f'    Print( "--- Running Meshing ---" );',
-        f'    ExecAnalysis( "VSPAEROComputeGeometry" );',
-        f'    SetAnalysisInputDefaults( "VSPAEROSweep" );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Sref",           {darr(Sref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "cref",           {darr(cref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "bref",           {darr(bref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Xcg",            {darr(x_cg)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaStart",     {darr(float(alpha))}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaEnd",       {darr(float(alpha))}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "AlphaNpts",      {iarr(1)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "MachStart",      {darr(mach)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "MachNpts",       {iarr(1)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Vinf",           {darr(100.0)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "WakeNumIter",    {iarr(15)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "NCPU",           {iarr(8)}, 0 );',
-        f'    Print( "--- Running Aero Point ---" );',
-        f'    SetStringAnalysisInput( "VSPAEROSweep", "RedirectFile", array<string> = {{"{vsp3_path}_log.txt"}}, 0 );'
-        f'    ExecAnalysis( "VSPAEROSweep" );',
-        "}",
-    ]
+    # Meshing    
+    vsp.ClearVSPModel()
+    vsp.ReadVSPFile(vsp3_path)
+    geom_analysis = "VSPAEROComputeGeometry"
+    vsp.SetAnalysisInputDefaults(geom_analysis)
+    vsp.SetIntAnalysisInput(geom_analysis, "GeomSet", [vsp.SET_NONE])      
+    vsp.SetIntAnalysisInput(geom_analysis, "ThinGeomSet", [vsp.SET_ALL])
+    vsp.ExecAnalysis(geom_analysis)
+    
+    # Aero Analysis
+    aero_analysis = "VSPAEROSweep"
+    vsp.SetAnalysisInputDefaults(aero_analysis)
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Sref", [Sref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "cref", [cref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "bref", [bref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "AlphaStart", [alpha])
+    vsp.SetIntAnalysisInput(aero_analysis, "AlphaNpts", [1])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "AlphaEnd", [alpha])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "MachStart", [mach])
+    vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
+    vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [6]) 
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [vin])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
+    vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
+    vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", f"{vsp3_path}_log.txt")
+    rid = vsp.ExecAnalysis(aero_analysis)
 
-    script_path = f"{vsp3_path.replace('.vsp3', '')}_aero.vspscript"
-    with open(script_path, 'w') as f:
-        f.write("\n".join(script_lines))
-
-    print(f"--- Running aero point (alpha={alpha}) ---")
-    subprocess.run([vsp_exe, "-script", script_path], check=True)
-    os.remove(script_path)
-
-    polar_file = vsp3_path.replace(".vsp3", ".polar")
-    CL, CD, Cm = parse_polar(polar_file)
-    cl = CL[0]
-    cd = CD[0]
-    cm = Cm[0]
-    return {
-        "CL": cl,
-        "CD": cd,
-        "LD": cl / cd,
-        "CM": cm,
-    }
-
-def parse_polar(polar_path):
-    CL, CD, Cm = [], [], []
-    col_cl = col_cd = col_cm = None
- 
-    with open(polar_path, 'r') as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped or stripped.startswith('#'):
-                continue
-            tokens = stripped.split()
-            if tokens[0] == 'Beta':
-                col_cl = tokens.index('CLtot')
-                col_cd = tokens.index('CDtot')
-                col_cm = tokens.index('CMytot')
-                continue
-            if col_cl is None:
-                continue
-            try:
-                CL.append(float(tokens[col_cl]))
-                CD.append(float(tokens[col_cd]))
-                Cm.append(float(tokens[col_cm]))
-            except (ValueError, IndexError):
-                continue
- 
-    return CL, CD, Cm
+    # Results
+    polar_res = vsp.FindLatestResultsID("VSPAERO_Polar")
+    cl = vsp.GetDoubleResults(polar_res, "CLtot")[0]
+    cd = vsp.GetDoubleResults(polar_res, "CDtot")[0]
+    cm = vsp.GetDoubleResults(polar_res, "CMytot")[0]
+    return cl, cd, cl/cd, cm
 
 def estimate_wetted_area(root_chord, taper, span):
     tip_chord     = root_chord * taper
