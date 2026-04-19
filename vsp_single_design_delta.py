@@ -12,8 +12,8 @@ from dash import Dash, dcc, html, Input, Output
 
 vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
-wing_span_res = 20
-wing_chord_res = 50
+wing_span_res = 10
+wing_chord_res = 25
 velocities = list(range(10, 25, 5)) # m/s
 alphas = list(range(-5, 15, 3)) # degrees AoA
 
@@ -45,21 +45,14 @@ def main():
     for v in velocities:
         print(f"\n=== Running VSP Aero Sweep at {v} m/s ===")
         stl_path, vsp3_path = generate_wing("wing")
-        CL, CD, CDi, Cm, load_res = vsp_sweep(vsp3_path, v, Sref, bref, cref)
-        cl_data = read_lift_distribution(load_res)
-        first_aoa_key = list(cl_data.keys())[0]
-        span_locations = cl_data[first_aoa_key]['SoverB']
-        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm"] + [f"Cl_span_{loc:.4f}" for loc in span_locations[0]] + ["Oswald_efficiency"]
+        CL, CD, CDi, Cm = vsp_sweep(vsp3_path, v, Sref, bref, cref)
+        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm", "Oswald_efficiency"]
 
         # Combine sweep results with local spanwise results
         aero_results = []
         for i, alpha in enumerate(alphas):
-            e = [compute_oswald(CL[i], CDi[i], Sref, bref)]
-            base_row = [v, alpha, CL[i], CD[i], Cm[i]]
-            closest_aoa_key = min(cl_data.keys(), key=lambda k: abs(k - alpha))
-            spanwise_cls = cl_data[closest_aoa_key]['Cl'][0]
-            full_row = base_row + list(spanwise_cls) + e
-            aero_results.append(full_row)
+            row = [v, alpha, CL[i], CD[i], Cm[i], compute_oswald(CL[i], CDi[i], Sref, bref)]
+            aero_results.append(row)
 
         aero_filename = "aero_full.csv"
         with open(aero_filename, 'a', newline='') as f:
@@ -83,11 +76,10 @@ def main():
         stl_path, vsp3_path = generate_wing("wing")
         stab_results = vsp_stability(vsp3_path, v, Sref, bref, cref)
         stab_dict = read_stability(stab_results)
-        sm = get_sm(stab_results)
         
         stability_filename = "stability.csv"
         stab_headers = ["Velocity"] + list(stab_dict.keys()) + ["StaticMargin"]
-        stab_columns = [v] + list(stab_dict.values()) + [sm]
+        stab_columns = [v] + list(stab_dict.values())
         
         with open(stability_filename, 'a', newline='') as f:
             writer = csv.writer(f)
@@ -186,12 +178,11 @@ def vsp_sweep(vsp3_path, v, Sref, bref, cref):
 
     # Results
     polar_res = vsp.FindLatestResultsID("VSPAERO_Polar")
-    load_res = vsp.FindLatestResultsID("VSPAERO_Load")
     cl = vsp.GetDoubleResults(polar_res, "CLtot")
     cd = vsp.GetDoubleResults(polar_res, "CDtot")
     cdi = vsp.GetDoubleResults(polar_res, "CDi")
     cm = vsp.GetDoubleResults(polar_res, "CMytot")
-    return cl, cd, cdi, cm, load_res
+    return cl, cd, cdi, cm
 
 def vsp_stability(vsp3_path, v, Sref, bref, cref):    
     # Load model
@@ -243,42 +234,43 @@ def read_stability(stab_res):
     vsp_dict = {}
     
     # Stability Derivatives
-    vsp_dict["Cm_alpha"] = vsp.GetDoubleResults(stab_res, "Alpha_CMm")[0] # Longitudinal Static Stability (C_m_alpha)
-    vsp_dict["Cn_beta"]  = vsp.GetDoubleResults(stab_res, "Beta_CMn")[0] # Directional Static Stability (C_n_beta)
-    vsp_dict["Cl_beta"]  = vsp.GetDoubleResults(stab_res, "Beta_CMl")[0] # Lateral Static Stability / Dihedral Effect (C_l_beta)
-    vsp_dict["Cm_q"]     = vsp.GetDoubleResults(stab_res, "Pitch_Rate_CMm")[0] # Pitch Damping (C_m_q)
-    vsp_dict["Cn_r"]     = vsp.GetDoubleResults(stab_res, "Yaw___Rate_CMn")[0] # Yaw Damping (C_n_r)
-    vsp_dict["Cl_p"]     = vsp.GetDoubleResults(stab_res, "Roll__Rate_CMl")[0] # Roll Damping (C_l_p)
-    vsp_dict["Cl_r"]     = vsp.GetDoubleResults(stab_res, "Yaw___Rate_CMl")[0] # Roll due to Yaw Rate (C_l_r) - Major Dutch Roll contributor
-    vsp_dict["Cn_p"]     = vsp.GetDoubleResults(stab_res, "Roll__Rate_CMn")[0] # Yaw due to Roll Rate (C_n_p)
+    vsp_dict["Cm_alpha"]      = vsp.GetDoubleResults(stab_res, "Alpha_CMm")[0] # Longitudinal Static Stability
+    vsp_dict["Cn_beta"]       = vsp.GetDoubleResults(stab_res, "Beta_CMn")[0] # Directional Static Stability
+    vsp_dict["Cl_beta"]       = vsp.GetDoubleResults(stab_res, "Beta_CMl")[0] # Lateral Static Stability / Dihedral Effect
+    vsp_dict["Cm_q"]          = vsp.GetDoubleResults(stab_res, "Pitch_Rate_CMm")[0] # Pitch Damping (C_m_q)
+    vsp_dict["Cn_r"]          = vsp.GetDoubleResults(stab_res, "Yaw___Rate_CMn")[0] # Yaw Damping (C_n_r)
+    vsp_dict["Cl_p"]          = vsp.GetDoubleResults(stab_res, "Roll__Rate_CMl")[0] # Roll Damping (C_l_p)
+    vsp_dict["Cl_r"]          = vsp.GetDoubleResults(stab_res, "Yaw___Rate_CMl")[0] # Roll due to Yaw Rate (C_l_r) - Dutch Roll
+    vsp_dict["Cn_p"]          = vsp.GetDoubleResults(stab_res, "Roll__Rate_CMn")[0] # Yaw due to Roll Rate (C_n_p)
+    vsp_dict["Static Margin"] = vsp.GetDoubleResults(stab_res, "SM")[0] # Static Margin
 
-    # Control Derivatives (Safely fall back to 0.0 if geometry is missing)
+    # Control Derivatives (Fall back to 0.0 if geometry is missing)
     try:
-        vsp_dict["Cm_de"] = vsp.GetDoubleResults(stab_res, "Pitch_CMm")[0] # Elevator Authority (C_m_de)
+        vsp_dict["Cm_de"] = vsp.GetDoubleResults(stab_res, "Pitch_CMm")[0] # Elevator Authority
     except IndexError:
         vsp_dict["Cm_de"] = 0.0
 
     try:
-        vsp_dict["Cl_da"] = vsp.GetDoubleResults(stab_res, "Roll_CMl")[0] # Aileron Authority (C_l_da)
+        vsp_dict["Cl_da"] = vsp.GetDoubleResults(stab_res, "Roll_CMl")[0] # Aileron Authority
     except IndexError:
         vsp_dict["Cl_da"] = 0.0
 
     try:
-        vsp_dict["Cn_da"] = vsp.GetDoubleResults(stab_res, "Roll_CMn")[0] # Adverse Yaw (C_n_da)
+        vsp_dict["Cn_da"] = vsp.GetDoubleResults(stab_res, "Roll_CMn")[0] # Adverse Yaw
     except IndexError:
         vsp_dict["Cn_da"] = 0.0
 
     return vsp_dict
     
-def read_lift_distribution(load_result, target_vortex_sheet=1):
+def read_lift_distribution(load_result):
     data_by_aoa = {}
-    current_aoa = vsp.GetDoubleResults(load_result, "Angle ")[0]
-    if current_aoa not in data_by_aoa:
-        data_by_aoa[current_aoa] = {'SoverB': [], 'Cl': []}
-        soverb = vsp.GetDoubleResults(load_result, "SoverB")
-        cl = vsp.GetDoubleResults(load_result, "cl*c/cref")
-        data_by_aoa[current_aoa]['SoverB'].append(soverb)
-        data_by_aoa[current_aoa]['Cl'].append(cl)         
+    for current_aoa in vsp.GetDoubleResults(load_result, "FC_AoA_"):
+        if current_aoa not in data_by_aoa:
+            data_by_aoa[current_aoa] = {'SoverB': [], 'Cl': []}
+            soverb = vsp.GetDoubleResults(load_result, "SoverB")
+            cl = vsp.GetDoubleResults(load_result, "cl*c/cref")
+            data_by_aoa[current_aoa]['SoverB'].append(soverb)
+            data_by_aoa[current_aoa]['Cl'].append(cl)         
     return data_by_aoa
 
 def compute_oswald(cl, cdi, s, b):
@@ -292,9 +284,6 @@ def compute_oswald(cl, cdi, s, b):
         return float(e)
     return e
     
-def get_sm(stab_res):
-    return vsp.GetDoubleResults(stab_res, "SM")[0]
-
 def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     # --- Data Loading & Pre-processing ---
     df_aero = pd.read_csv(sweep_csv)
