@@ -5,4 +5,5 @@ Airfoils/
 plane*
 wing*
 Optimized_Wing*
-vsp_optimization_copy.py
+.vscode
+test.py
