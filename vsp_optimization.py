@@ -159,7 +159,6 @@ def evaluate_aero_objective(x):
         print(f"Run {run_id} failed: {e}")
         return 1e10 # Massive penalty for crashed runs
     finally:
-        os.remove("w")
         for filename in glob.glob(f"{run_id}*"):
             try:
                 os.remove(filename)
@@ -244,7 +243,7 @@ def vsp_point(vsp3_path, vin, alpha, Sref, bref, cref, x_cg):
     vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [vin])
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
     vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
-    vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", f"{vsp3_path}_log.txt")
+    vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", [f"{vsp3_path}_log.txt"])
     rid = vsp.ExecAnalysis(aero_analysis)
 
     # Results

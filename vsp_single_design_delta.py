@@ -60,7 +60,6 @@ def main():
                 csv_exists = True
             writer.writerows(aero_results)
 
-        os.remove("w")
         for filename in glob.glob("wing*"):
             try:
                 os.remove(filename)
@@ -86,7 +85,6 @@ def main():
                 stab_csv_exists = True
             writer.writerow(stab_columns)
 
-        os.remove("w")
         for filename in glob.glob("wing*"):
             try:
                 os.remove(filename)
@@ -122,6 +120,15 @@ def generate_wing(wing_name):
     vsp.ReadFileAirfoil(tip_xsec, airfoil_file)
     
     vsp.SetSetFlag(wing_id, 1, True)
+    
+    # Control surfaces
+    elevon_id = vsp.AddSubSurf(wing_id, vsp.SS_CONTROL)
+    vsp.SetSubSurfName(elevon_id, "Elevons")
+    vsp.SetParmVal(wing_id, "EtaFlag", "SS_Control_1", 1.0)
+    vsp.SetParmVal(wing_id, "EtaStart", "SS_Control_1", elevon_start)
+    vsp.SetParmVal(wing_id, "EtaEnd", "SS_Control_1", elevon_end)
+    vsp.SetParmVal(wing_id, "SE_Const_Flag", "SS_Control_1", 1.0)
+    vsp.SetParmVal(wing_id, "Length_C_Start", "SS_Control_1", elevon_length)
 
     # Finalize and export
     vsp.Update()
@@ -171,7 +178,7 @@ def vsp_sweep(vsp3_path, v, Sref, bref, cref):
     vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [v])
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
     vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
-    vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", f"{vsp3_path}_log.txt")
+    vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", [f"{vsp3_path}_log.txt"])
     rid = vsp.ExecAnalysis(aero_analysis)
 
     # Results
@@ -202,7 +209,7 @@ def vsp_stability(vsp3_path, v, Sref, bref, cref):
     container_id = vsp.FindContainer("VSPAEROSettings", 0)
     wing_id = vsp.FindGeoms()[0]
     cs_id = vsp.GetSubSurf(wing_id, 0)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", group_pitch_str), -1)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", "Wing_SS_CONT_0"), -1)
     vsp.ExecAnalysis(geom_analysis)
 
     # Stability Sweep
@@ -222,7 +229,7 @@ def vsp_stability(vsp3_path, v, Sref, bref, cref):
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
     vsp.SetIntAnalysisInput(aero_analysis, "UnsteadyType", [1])
     vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
-    vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", f"{vsp3_path}_log.txt")
+    vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", [f"{vsp3_path}_log.txt"])
     vsp.ExecAnalysis(aero_analysis)
     
     stab_results = vsp.FindLatestResultsID("VSPAERO_Stab")
@@ -357,6 +364,6 @@ def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     return app
 
 if __name__ == '__main__':
-    main()
+    # main()
     app = plot_dashboards()
     app.run(debug=True)
