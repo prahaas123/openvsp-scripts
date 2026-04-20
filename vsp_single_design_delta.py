@@ -5,17 +5,15 @@ import numpy as np
 import pandas as pd
 import csv
 import glob
-import plotly.graph_objects as go
 import plotly.express as px
-from dash import Dash, dcc, html, Input, Output
-# import dash_bootstrap_components as dbc
+from dash import Dash, dcc, html
 
 vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 10
 wing_chord_res = 25
-velocities = list(range(10, 25, 5)) # m/s
-alphas = list(range(-5, 15, 3)) # degrees AoA
+velocities = list(range(10, 50, 5)) # m/s
+alphas = list(range(-5, 15, 1)) # degrees AoA
 
 airfoil_file = r"Airfoils\mh45.dat"
 
@@ -78,7 +76,7 @@ def main():
         stab_dict = read_stability(stab_results)
         
         stability_filename = "stability.csv"
-        stab_headers = ["Velocity"] + list(stab_dict.keys()) + ["StaticMargin"]
+        stab_headers = ["Velocity"] + list(stab_dict.keys())
         stab_columns = [v] + list(stab_dict.values())
         
         with open(stability_filename, 'a', newline='') as f:
@@ -285,159 +283,80 @@ def compute_oswald(cl, cdi, s, b):
     return e
     
 def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
-    # --- Data Loading & Pre-processing ---
     df_aero = pd.read_csv(sweep_csv)
     df_stab = pd.read_csv(stab_csv)
-
-    # Calculate L/D Ratio
     df_aero['L_D'] = df_aero['CL'] / df_aero['CD']
 
-    # Extract spanwise columns and their numerical positions
-    span_cols = [c for c in df_aero.columns if "Cl_span_" in c]
-    span_pos = [float(c.split("_")[-1]) for c in span_cols]
-
-    # Initialize Dash App with a Dark Theme
-    app = Dash(__name__, external_stylesheets=[dbc.themes.DARKLY])
-
-    # Default plotly template for dark mode
+    # Initialize Dash App
+    app = Dash(__name__)
     PLOT_TEMPLATE = "plotly_dark"
 
-    app.layout = dbc.Container([
-        html.H1("Flying Wing Performance", className="mt-4 mb-4 text-center"),
-        
-        dcc.Tabs([
-            # --- TAB 1: AERODYNAMICS ---
-            dcc.Tab(label='Aerodynamics', children=[
-                # Row 1: CL, CD, Cm
-                dbc.Row([
-                    dbc.Col(dcc.Graph(id='graph-cl-alpha'), width=4),
-                    dbc.Col(dcc.Graph(id='graph-cd-alpha'), width=4),
-                    dbc.Col(dcc.Graph(id='graph-cm-alpha'), width=4),
-                ], className="mt-4"),
-                
-                # Row 2: Polar, L/D, Oswald
-                dbc.Row([
-                    dbc.Col(dcc.Graph(id='graph-cl-cd'), width=4),
-                    dbc.Col(dcc.Graph(id='graph-ld-alpha'), width=4),
-                    dbc.Col(dcc.Graph(id='graph-oswald-alpha'), width=4),
-                ], className="mt-4"),
-
-                # Row 3: Lift Distribution (Full Width)
-                dbc.Row([
-                    dbc.Col([
-                        html.Div([
-                            html.Label("Select Angle of Attack (Alpha):", className="me-2"),
-                            dcc.Dropdown(
-                                id='alpha-dropdown',
-                                options=[{'label': f"{a}°", 'value': a} for a in df_aero['Alpha_deg'].unique()],
-                                value=0,
-                                clearable=False,
-                                style={'color': 'black', 'width': '100px', 'display': 'inline-block', 'verticalAlign': 'middle'}
-                            )
-                        ], className="text-center mt-4"),
-                        dcc.Graph(id='graph-span-lift'),
-                    ], width=12)
-                ])
-            ], className="p-3"),
-
-            # --- TAB 2: STABILITY ---
-            dcc.Tab(label='Stability', children=[
-                # Row 1
-                dbc.Row([
-                    dbc.Col(dcc.Graph(id='stab-cl-beta'), width=4),
-                    dbc.Col(dcc.Graph(id='stab-cn-beta'), width=4),
-                    dbc.Col(dcc.Graph(id='stab-static-margin'), width=4),
-                ], className="mt-3"),
-                # Row 2
-                dbc.Row([
-                    dbc.Col(dcc.Graph(id='stab-cl-p'), width=4),
-                    dbc.Col(dcc.Graph(id='stab-cn-p'), width=4),
-                    dbc.Col(dcc.Graph(id='stab-cm-q'), width=4),
-                ], className="mt-3"),
-                # Row 3
-                dbc.Row([
-                    dbc.Col(dcc.Graph(id='stab-cl-r'), width=4),
-                    dbc.Col(dcc.Graph(id='stab-cn-r'), width=4),
-                    dbc.Col(dcc.Graph(id='stab-cm-de'), width=4),
-                ], className="mt-3"),
-            ], className="p-3")
-        ])
-    ], fluid=True)
-
-    # --- Callbacks ---
-
-    @app.callback(
-        [Output('graph-cl-alpha', 'figure'),
-         Output('graph-cd-alpha', 'figure'),
-         Output('graph-cm-alpha', 'figure'),
-         Output('graph-cl-cd', 'figure'),
-         Output('graph-ld-alpha', 'figure'),
-         Output('graph-oswald-alpha', 'figure')],
-        [Input('alpha-dropdown', 'value')]
-    )
-    def update_aero_plots(_):
-        # Helper to create styled line plots
-        def create_fig(y_col, title, x_col='Alpha_deg'):
-            fig = px.line(df_aero, x=x_col, y=y_col, color='Velocity', title=title, markers=True, template=PLOT_TEMPLATE)
-            fig.update_layout(margin=dict(l=20, r=20, t=40, b=20))
-            return fig
-
-        return (
-            create_fig('CL', 'CL vs Alpha'),
-            create_fig('CD', 'CD vs Alpha'),
-            create_fig('Cm', 'Cm vs Alpha'),
-            create_fig('CL', 'Drag Polar (CL vs CD)', x_col='CD'),
-            create_fig('L_D', 'L/D vs Alpha'),
-            create_fig('Oswald_efficiency', 'Oswald Efficiency vs Alpha')
-        )
-
-    @app.callback(
-        Output('graph-span-lift', 'figure'),
-        [Input('alpha-dropdown', 'value')]
-    )
-    def update_span_plot(selected_alpha):
-        row = df_aero[df_aero['Alpha_deg'] == selected_alpha].iloc[0]
-        cl_values = [row[col] for col in span_cols]
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=span_pos, y=cl_values, mode='lines+markers', fill='tozeroy', name='Local Cl'))
-        fig.update_layout(
-            template=PLOT_TEMPLATE,
-            title=f"Spanwise Lift Distribution (Alpha = {selected_alpha}°)",
-            xaxis_title="Normalized Span Position (y/b)",
-            yaxis_title="Local Cl",
-            height=450
-        )
+    # --- Figure Generation Helpers ---
+    def create_aero_fig(y_col, title, x_col='Alpha_deg'):
+        fig = px.line(df_aero, x=x_col, y=y_col, color='Velocity', title=title, markers=True, template=PLOT_TEMPLATE)
+        fig.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor='#222222', plot_bgcolor='#222222')
         return fig
 
-    @app.callback(
-        [Output('stab-cl-beta', 'figure'), Output('stab-cn-beta', 'figure'), Output('stab-static-margin', 'figure'),
-         Output('stab-cl-p', 'figure'), Output('stab-cn-p', 'figure'), Output('stab-cm-q', 'figure'),
-         Output('stab-cl-r', 'figure'), Output('stab-cn-r', 'figure'), Output('stab-cm-de', 'figure')],
-        [Input('alpha-dropdown', 'value')] # Using any input to trigger initial load
-    )
-    def update_stability_grid(_):
-        def create_stab_fig(y_col, title, color="#3498DB"):
+    def create_stab_fig(y_col, title, color="#3498DB"):
+        # Fallback if a column hasn't been generated yet
+        if y_col not in df_stab.columns:
+            fig = px.line(title=f"{title} (No Data)", template=PLOT_TEMPLATE)
+        else:
             fig = px.line(df_stab, x='Velocity', y=y_col, markers=True, template=PLOT_TEMPLATE, title=title)
             fig.update_traces(line_color=color)
-            fig.update_layout(margin=dict(l=20, r=20, t=40, b=20))
-            return fig
+        
+        fig.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor='#222222', plot_bgcolor='#222222')
+        return fig
 
-        return (
-            create_stab_fig('Cl_beta', 'Cl_beta (Dihedral Effect)', '#E74C3C'),
-            create_stab_fig('Cn_beta', 'Cn_beta (Directional Stability)', '#F1C40F'),
-            create_stab_fig('StaticMargin', 'Static Margin', "#2ECC70"),
-            create_stab_fig('Cl_p', 'Cl_p (Roll Damping)', "#2E65CC"),
-            create_stab_fig('Cn_p', 'Cn_p (Cross Derivative)', "#F0F0F0"),
-            create_stab_fig('Cm_q', 'Cm_q (Pitch Damping)', "#921CA1"),
-            create_stab_fig('Cl_r', 'Cl_r (Cross Derivative)', "#7E510F"),
-            create_stab_fig('Cn_r', 'Cn_r (Yaw Damping)', "#B95674"),
-            create_stab_fig('Cm_de', 'Cm_de (Elevator Authority)', "#0DB9B9")
-        )
+    # --- CSS Styles ---
+    grid_style = {
+        'display': 'grid',
+        'gridTemplateColumns': 'repeat(3, 1fr)', # 3 columns of equal width
+        'gap': '20px',
+        'padding': '20px'
+    }
+    
+    tab_style = {'backgroundColor': '#333333', 'color': 'white', 'border': 'none'}
+    tab_selected_style = {'backgroundColor': '#555555', 'color': 'white', 'fontWeight': 'bold', 'border': 'none'}
+
+    # --- App Layout ---
+    app.layout = html.Div(style={'backgroundColor': '#111111', 'minHeight': '100vh', 'color': 'white', 'fontFamily': 'Arial, sans-serif'}, children=[
+        html.H1("Flying Wing Performance", style={'textAlign': 'center', 'paddingTop': '20px', 'margin': '0'}),
+        
+        dcc.Tabs(style={'padding': '20px'}, children=[
+            
+            # --- TAB 1: AERODYNAMICS ---
+            dcc.Tab(label='Aerodynamics', style=tab_style, selected_style=tab_selected_style, children=[
+                html.Div(style=grid_style, children=[
+                    dcc.Graph(figure=create_aero_fig('CL', 'CL vs Alpha')),
+                    dcc.Graph(figure=create_aero_fig('CD', 'CD vs Alpha')),
+                    dcc.Graph(figure=create_aero_fig('Cm', 'Cm vs Alpha')),
+                    dcc.Graph(figure=create_aero_fig('CL', 'Drag Polar (CL vs CD)', x_col='CD')),
+                    dcc.Graph(figure=create_aero_fig('L_D', 'L/D vs Alpha')),
+                    dcc.Graph(figure=create_aero_fig('Oswald_efficiency', 'Oswald Efficiency vs Alpha'))
+                ])
+            ]),
+
+            # --- TAB 2: STABILITY ---
+            dcc.Tab(label='Stability', style=tab_style, selected_style=tab_selected_style, children=[
+                html.Div(style=grid_style, children=[
+                    dcc.Graph(figure=create_stab_fig('Cl_beta', 'Cl_beta (Dihedral Effect)', '#E74C3C')),
+                    dcc.Graph(figure=create_stab_fig('Cn_beta', 'Cn_beta (Directional Stability)', '#F1C40F')),
+                    dcc.Graph(figure=create_stab_fig('Static Margin', 'Static Margin', "#2ECC70")),
+                    dcc.Graph(figure=create_stab_fig('Cl_p', 'Cl_p (Roll Damping)', "#2E65CC")),
+                    dcc.Graph(figure=create_stab_fig('Cn_p', 'Cn_p (Cross Derivative)', "#F0F0F0")),
+                    dcc.Graph(figure=create_stab_fig('Cm_q', 'Cm_q (Pitch Damping)', "#921CA1")),
+                    dcc.Graph(figure=create_stab_fig('Cl_r', 'Cl_r (Cross Derivative)', "#7E510F")),
+                    dcc.Graph(figure=create_stab_fig('Cn_r', 'Cn_r (Yaw Damping)', "#B95674")),
+                    dcc.Graph(figure=create_stab_fig('Cm_de', 'Cm_de (Elevator Authority)', "#0DB9B9"))
+                ])
+            ])
+        ])
+    ])
 
     return app
 
 if __name__ == '__main__':
-    main()    
-    # app = plot_dashboards()
-    # app.run(debug=True)
+    main()
+    app = plot_dashboards()
+    app.run(debug=True)
