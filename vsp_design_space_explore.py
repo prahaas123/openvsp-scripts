@@ -1,4 +1,4 @@
-import openvsp as vsp
+import openvsp as vsp # type: ignore
 import os
 import glob
 import pyvista as pv

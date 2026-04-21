@@ -1,5 +1,5 @@
 import os
-import openvsp as vsp
+import openvsp as vsp # type: ignore
 import csv
 import pyvista as pv
 import numpy as np

@@ -1,5 +1,5 @@
 import os
-import openvsp as vsp
+import openvsp as vsp # type: ignore
 import pyvista as pv
 import numpy as np
 import pandas as pd
@@ -209,7 +209,10 @@ def vsp_stability(vsp3_path, v, Sref, bref, cref):
     container_id = vsp.FindContainer("VSPAEROSettings", 0)
     wing_id = vsp.FindGeoms()[0]
     cs_id = vsp.GetSubSurf(wing_id, 0)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", "Wing_SS_CONT_0"), -1)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_0_Gain", "ControlSurfaceGroup_0"), 1)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", "ControlSurfaceGroup_0"), -1)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_0_Gain", "ControlSurfaceGroup_1"), 1)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", "ControlSurfaceGroup_1"), 1)
     vsp.ExecAnalysis(geom_analysis)
 
     # Stability Sweep
