@@ -71,8 +71,8 @@ def main():
     
     for v in velocities:
         stl_path, vsp3_path = generate_wing("wing")
-        stab_results = vsp_stability(vsp3_path, v, Sref, bref, cref)
-        stab_dict = read_stability(stab_results)
+        vsp_stability(vsp3_path, v, Sref, bref, cref)
+        stab_dict = read_stability()
         
         stability_filename = "stability.csv"
         stab_headers = ["Velocity"] + list(stab_dict.keys())
@@ -129,6 +129,18 @@ def generate_wing(wing_name):
     vsp.SetParmVal(wing_id, "EtaEnd", "SS_Control_1", elevon_end)
     vsp.SetParmVal(wing_id, "SE_Const_Flag", "SS_Control_1", 1.0)
     vsp.SetParmVal(wing_id, "Length_C_Start", "SS_Control_1", elevon_length)
+    cs_pitch_id = vsp.CreateVSPAEROControlSurfaceGroup() # Pitch
+    vsp.SetVSPAEROControlGroupName("Pitch", cs_pitch_id)
+    vsp.AddAllToVSPAEROControlSurfaceGroup(cs_pitch_id)
+    cs_roll_id = vsp.CreateVSPAEROControlSurfaceGroup() # Roll
+    vsp.SetVSPAEROControlGroupName("Roll", cs_roll_id)
+    vsp.AddAllToVSPAEROControlSurfaceGroup(cs_roll_id)
+    vsp.Update()
+    container_id = vsp.FindContainer("VSPAEROSettings", 0)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{elevon_id}_0_Gain", "ControlSurfaceGroup_0"), 1.0)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{elevon_id}_1_Gain", "ControlSurfaceGroup_0"), -1.0)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{elevon_id}_0_Gain", "ControlSurfaceGroup_1"), 1.0)
+    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{elevon_id}_1_Gain", "ControlSurfaceGroup_1"), 1.0)
 
     # Finalize and export
     vsp.Update()
@@ -160,7 +172,7 @@ def vsp_sweep(vsp3_path, v, Sref, bref, cref):
     geom_analysis = "VSPAEROComputeGeometry"
     vsp.SetAnalysisInputDefaults(geom_analysis)
     vsp.SetIntAnalysisInput(geom_analysis, "GeomSet", [vsp.SET_NONE])      
-    vsp.SetIntAnalysisInput(geom_analysis, "ThinGeomSet", [vsp.SET_ALL])
+    vsp.SetIntAnalysisInput(geom_analysis, "ThinGeomSet", [vsp.SET_SHOWN])
     vsp.ExecAnalysis(geom_analysis)
     
     # Aero Analysis
@@ -189,30 +201,13 @@ def vsp_sweep(vsp3_path, v, Sref, bref, cref):
     cm = vsp.GetDoubleResults(polar_res, "CMytot")
     return cl, cd, cdi, cm
 
-def vsp_stability(vsp3_path, v, Sref, bref, cref):    
+def vsp_stability(vsp3_path, v, Sref, bref, cref):
     # Load model
     vsp.ReadVSPFile(vsp3_path)
     geom_analysis = "VSPAEROComputeGeometry"
-    vsp.SetAnalysisInputDefaults(geom_analysis)
+    vsp.SetAnalysisInputDefaults(geom_analysis)   
     vsp.SetIntAnalysisInput(geom_analysis, "GeomSet", [vsp.SET_NONE])      
     vsp.SetIntAnalysisInput(geom_analysis, "ThinGeomSet", [vsp.SET_SHOWN])
-    
-    # Control surfaces
-    cs_pitch_id = vsp.CreateVSPAEROControlSurfaceGroup() # Pitch
-    vsp.SetVSPAEROControlGroupName("Pitch", cs_pitch_id)
-    vsp.AddAllToVSPAEROControlSurfaceGroup(cs_pitch_id)
-    cs_roll_id = vsp.CreateVSPAEROControlSurfaceGroup() # Roll
-    vsp.SetVSPAEROControlGroupName("Roll", cs_roll_id)
-    vsp.AddAllToVSPAEROControlSurfaceGroup(cs_roll_id)
-    vsp.Update()
-    group_pitch_str = f"ControlSurfaceGroup_{cs_pitch_id + 1}"
-    container_id = vsp.FindContainer("VSPAEROSettings", 0)
-    wing_id = vsp.FindGeoms()[0]
-    cs_id = vsp.GetSubSurf(wing_id, 0)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_0_Gain", "ControlSurfaceGroup_0"), 1)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", "ControlSurfaceGroup_0"), -1)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_0_Gain", "ControlSurfaceGroup_1"), 1)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{cs_id}_1_Gain", "ControlSurfaceGroup_1"), 1)
     vsp.ExecAnalysis(geom_analysis)
 
     # Stability Sweep
@@ -234,39 +229,67 @@ def vsp_stability(vsp3_path, v, Sref, bref, cref):
     vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
     vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", [f"{vsp3_path}_log.txt"])
     vsp.ExecAnalysis(aero_analysis)
-    
-    stab_results = vsp.FindLatestResultsID("VSPAERO_Stab")
-    return stab_results
 
-def read_stability(stab_res):
-    vsp_dict = {}
-    
-    # Stability Derivatives
-    vsp_dict["Cm_alpha"]      = vsp.GetDoubleResults(stab_res, "Alpha_CMm")[0] # Longitudinal Static Stability
-    vsp_dict["Cn_beta"]       = vsp.GetDoubleResults(stab_res, "Beta_CMn")[0] # Directional Static Stability
-    vsp_dict["Cl_beta"]       = vsp.GetDoubleResults(stab_res, "Beta_CMl")[0] # Lateral Static Stability / Dihedral Effect
-    vsp_dict["Cm_q"]          = vsp.GetDoubleResults(stab_res, "Pitch_Rate_CMm")[0] # Pitch Damping (C_m_q)
-    vsp_dict["Cn_r"]          = vsp.GetDoubleResults(stab_res, "Yaw___Rate_CMn")[0] # Yaw Damping (C_n_r)
-    vsp_dict["Cl_p"]          = vsp.GetDoubleResults(stab_res, "Roll__Rate_CMl")[0] # Roll Damping (C_l_p)
-    vsp_dict["Cl_r"]          = vsp.GetDoubleResults(stab_res, "Yaw___Rate_CMl")[0] # Roll due to Yaw Rate (C_l_r) - Dutch Roll
-    vsp_dict["Cn_p"]          = vsp.GetDoubleResults(stab_res, "Roll__Rate_CMn")[0] # Yaw due to Roll Rate (C_n_p)
-    vsp_dict["Static Margin"] = vsp.GetDoubleResults(stab_res, "SM")[0] # Static Margin
+def read_stability(stab_file_path="wing.stab"):
+    vsp_dict = {
+        "Cm_alpha": 0.0, "Cn_beta": 0.0, "Cl_beta": 0.0,
+        "Cm_q": 0.0, "Cn_r": 0.0, "Cl_p": 0.0,
+        "Cl_r": 0.0, "Cn_p": 0.0, "Static Margin": 0.0,
+        "Cm_de": 0.0, "Cl_da": 0.0, "Cn_da": 0.0
+    }
 
-    # Control Derivatives (Fall back to 0.0 if geometry is missing)
-    try:
-        vsp_dict["Cm_de"] = vsp.GetDoubleResults(stab_res, "Pitch_CMm")[0] # Elevator Authority
-    except IndexError:
-        vsp_dict["Cm_de"] = 0.0
+    with open(stab_file_path, 'r') as f:
+        lines = f.readlines()
 
-    try:
-        vsp_dict["Cl_da"] = vsp.GetDoubleResults(stab_res, "Roll_CMl")[0] # Aileron Authority
-    except IndexError:
-        vsp_dict["Cl_da"] = 0.0
+    header_idx = -1
+    for i, line in enumerate(lines):
+        if line.startswith("Coef") and "Total" in line and "Alpha" in line:
+            header_idx = i
+            break
 
-    try:
-        vsp_dict["Cn_da"] = vsp.GetDoubleResults(stab_res, "Roll_CMn")[0] # Adverse Yaw
-    except IndexError:
-        vsp_dict["Cn_da"] = 0.0
+    if header_idx != -1:
+        headers = lines[header_idx].split()
+        
+        col = {
+            "Alpha": headers.index("Alpha"),
+            "Beta": headers.index("Beta"),
+            "p": headers.index("p"),
+            "q": headers.index("q"),
+            "r": headers.index("r"),
+            "ConGrp_1": headers.index("ConGrp_1"),
+            "ConGrp_2": headers.index("ConGrp_2")
+        }
+
+        for line in lines[header_idx+1:]:
+            parts = line.split()
+            if not parts or parts[0].startswith("#"):
+                continue
+            
+            coef = parts[0]
+            try:
+                if coef == "CMl":
+                    vsp_dict["Cl_beta"] = float(parts[col["Beta"]])
+                    vsp_dict["Cl_p"]    = float(parts[col["p"]])
+                    vsp_dict["Cl_r"]    = float(parts[col["r"]])
+                    vsp_dict["Cl_da"]   = float(parts[col["ConGrp_2"]]) # Roll authority
+                elif coef == "CMm":
+                    vsp_dict["Cm_alpha"] = float(parts[col["Alpha"]])
+                    vsp_dict["Cm_q"]     = float(parts[col["q"]])
+                    vsp_dict["Cm_de"]    = float(parts[col["ConGrp_1"]]) # Pitch authority
+                elif coef == "CMn":
+                    vsp_dict["Cn_beta"]  = float(parts[col["Beta"]])
+                    vsp_dict["Cn_p"]     = float(parts[col["p"]])
+                    vsp_dict["Cn_r"]     = float(parts[col["r"]])
+                    vsp_dict["Cn_da"]    = float(parts[col["ConGrp_2"]]) # Adverse Yaw
+            except IndexError:
+                pass
+
+    for line in reversed(lines):
+        if line.startswith("SM"):
+            parts = line.split()
+            if len(parts) >= 2:
+                vsp_dict["Static Margin"] = float(parts[1])
+            break
 
     return vsp_dict
     
@@ -367,6 +390,6 @@ def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     return app
 
 if __name__ == '__main__':
-    # main()
-    app = plot_dashboards()
-    app.run(debug=True)
+    main()
+    # app = plot_dashboards()
+    # app.run(debug=True)
