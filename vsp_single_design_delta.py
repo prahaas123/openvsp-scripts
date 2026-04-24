@@ -366,6 +366,8 @@ def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
                     dcc.Graph(figure=create_aero_fig('CL', 'CL vs Alpha')),
                     dcc.Graph(figure=create_aero_fig('CD', 'CD vs Alpha')),
                     dcc.Graph(figure=create_aero_fig('Cm', 'Cm vs Alpha')),
+                    dcc.Graph(figure=create_aero_fig('Lift', 'Lift vs Alpha')),
+                    dcc.Graph(figure=create_aero_fig('Drag', 'Drag vs Alpha')),
                     dcc.Graph(figure=create_aero_fig('CL', 'Drag Polar (CL vs CD)', x_col='CD')),
                     dcc.Graph(figure=create_aero_fig('L_D', 'L/D vs Alpha')),
                     dcc.Graph(figure=create_aero_fig('Oswald_efficiency', 'Oswald Efficiency vs Alpha'))
