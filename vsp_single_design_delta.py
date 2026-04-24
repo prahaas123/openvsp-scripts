@@ -44,12 +44,14 @@ def main():
         print(f"\n=== Running VSP Aero Sweep at {v} m/s ===")
         stl_path, vsp3_path = generate_wing("wing")
         CL, CD, CDi, Cm = vsp_sweep(vsp3_path, v, Sref, bref, cref)
-        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm", "Oswald_efficiency"]
+        lift = [0.5 * 1.225 * (v ** 2) * Sref * cl_val for cl_val in CL]
+        drag = [0.5 * 1.225 * (v ** 2) * Sref * cd_val for cd_val in CD]
+        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm", "Lift", "Drag", "Oswald_efficiency"]
 
         # Combine sweep results with local spanwise results
         aero_results = []
         for i, alpha in enumerate(alphas):
-            row = [v, alpha, CL[i], CD[i], Cm[i], compute_oswald(CL[i], CDi[i], Sref, bref)]
+            row = [v, alpha, CL[i], CD[i], Cm[i], lift[i], drag[i], compute_oswald(CL[i], CDi[i], Sref, bref)]
             aero_results.append(row)
 
         aero_filename = "aero_full.csv"
@@ -390,6 +392,6 @@ def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     return app
 
 if __name__ == '__main__':
-    main()
-    # app = plot_dashboards()
-    # app.run(debug=True)
+    # main()
+    app = plot_dashboards()
+    app.run(debug=True)
