@@ -13,18 +13,19 @@ vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 15
 wing_chord_res = 25
-velocity = 15 # m/s
+velocity = 20 # m/s
 alpha = 3 # degrees AoA
 
 airfoil_file = r"Airfoils\mh45.dat"
 
 STATIC_MARGIN = 0.05
+WING_LOADING = 40  # N/m^2
 
 bounds = {
-    "wing_area":  (0.014, 0.02),     # meters^2
+    "mass":       (0.3, 0.55),      # kg
     "taper":      (0.1, 1.0),       # ratio
-    "sweep":      (0.0, 30.0),     # degrees
-    "twist":      (-8.0, 0.0),     # degrees
+    "sweep":      (0.0, 30.0),      # degrees
+    "twist":      (-8.0, 0.0),      # degrees
     "span":       (0.4, 0.7)        # meters
 }
 
@@ -39,7 +40,7 @@ def main():
     results = []
 
     for i in tqdm(range(total_sims)):
-        s  = np.random.uniform(*bounds["wing_area"])
+        s    = np.random.uniform(*bounds["mass"]) * 9.81 / WING_LOADING
         tap  = np.random.uniform(*bounds["taper"])
         swe  = np.random.uniform(*bounds["sweep"])
         twi  = np.random.uniform(*bounds["twist"])

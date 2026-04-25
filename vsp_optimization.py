@@ -11,14 +11,14 @@ vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 10
 wing_chord_res = 25
-velocity = 15 # m/s
+velocity = 20 # m/s
 alpha = 3 # degrees AoA
 
-airfoil_file = r"Airfoils\mh45.dat"
+airfoil_file = r"Airfoils\pw75.dat"
 
 MAX_WEIGHT = 9.81 * 0.5   # Newtons
 MIN_WEIGHT = 9.81 * 0.3   # Newtons
-WING_LOADING = 30  # N/m^2
+WING_LOADING = 40  # N/m^2
 STATIC_MARGIN = 0.05
 CM_MIN = -0.05   # lower bound on CM about CG
 CM_MAX =  0.05   # upper bound on CM about CG
@@ -39,11 +39,11 @@ LOG_FIELDS = [
 def main():   
     init_log()
     print("Starting SciPy DE Optimization...")
-    bounds = [(0.1, 0.3),   # Root chord
-              (0.1, 0.8),   # Taper ratio
+    bounds = [(0.18, 0.3),   # Root chord
+              (0.6, 0.95),   # Taper ratio
               (20.0, 40.0), # Sweep angle
-              (-10.0, 0.0), # Washout angle
-              (0.4, 0.6)]   # Wingspan
+              (-5.0, 0.0), # Washout angle
+              (0.5, 0.65)]   # Wingspan
 
     # Early-rejection geometric constraints
     geom_constraint = NonlinearConstraint(
@@ -155,7 +155,7 @@ def evaluate_aero_objective(x):
         else:
             print(f"  [{run_id}] Failed Aero Constraints. Lift={lift:.2f}N, CM={CM_cg:.3f}")
 
-        return -LD + penalty
+        return -(CL ** 2 / CD) + penalty
 
     except Exception as e:
         print(f"Run {run_id} failed: {e}")
