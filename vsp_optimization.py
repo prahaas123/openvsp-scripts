@@ -9,22 +9,24 @@ from scipy.optimize import differential_evolution, NonlinearConstraint
 
 vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
-wing_span_res = 20
-wing_chord_res = 50
+wing_span_res = 10
+wing_chord_res = 25
 velocity = 15 # m/s
 alpha = 3 # degrees AoA
 
 airfoil_file = r"Airfoils\mh45.dat"
 
-MAX_WEIGHT = 3   # Newtons
-MIN_S_REF = 0.1  # m2
-MAX_S_REF = 0.2  # m2
+MAX_WEIGHT = 9.81 * 0.5   # Newtons
+MIN_WEIGHT = 9.81 * 0.3   # Newtons
+WING_LOADING = 30  # N/m^2
 STATIC_MARGIN = 0.05
 CM_MIN = -0.05   # lower bound on CM about CG
 CM_MAX =  0.05   # upper bound on CM about CG
-AR_MIN = 3.0
+AR_MIN = 2.0
 AR_MAX = 6.0
 TIP_CHORD_MIN = 0.05
+MIN_S_REF = MIN_WEIGHT / WING_LOADING  # m2
+MAX_S_REF = MAX_WEIGHT / WING_LOADING  # m2
 
 LOG_CSV = "optimization_results.csv"
 LOG_FIELDS = [
@@ -37,11 +39,11 @@ LOG_FIELDS = [
 def main():   
     init_log()
     print("Starting SciPy DE Optimization...")
-    bounds = [(0.2, 0.4),   # Root chord
+    bounds = [(0.1, 0.3),   # Root chord
               (0.1, 0.8),   # Taper ratio
-              (20.0, 50.0), # Sweep angle
+              (20.0, 40.0), # Sweep angle
               (-10.0, 0.0), # Washout angle
-              (0.4, 0.9)]   # Wingspan
+              (0.4, 0.6)]   # Wingspan
 
     # Early-rejection geometric constraints
     geom_constraint = NonlinearConstraint(
