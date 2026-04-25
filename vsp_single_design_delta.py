@@ -15,17 +15,18 @@ wing_chord_res = 25
 velocities = list(range(10, 50, 5)) # m/s
 alphas = list(range(-5, 15, 1)) # degrees AoA
 
-airfoil_file = r"Airfoils\mh45.dat"
+airfoil_file = r"Airfoils\pw75.dat"
 
-root_chord = 0.232
-taper_ratio = 0.4288
-sweep = 27.2141
+root_chord = 0.21
+taper_ratio = 0.6
+sweep = 0.0
 dihedral = 3.0
-twist = -0.1073
-span = 1.0589
-x_cg = 0.1529
-elevon_length = 0.35        # % of chord
-elevon_start = 0.4          # % of wingspan
+twist = 0.0
+span = 0.7
+x_cg = 0.03
+angle = 3.5
+elevon_length = 0.3         # % of chord
+elevon_start = 0.3          # % of wingspan
 elevon_end = 0.9            # % of wingspan
 
 def main():
@@ -109,6 +110,7 @@ def generate_wing(wing_name):
     vsp.SetParmVal( wing_id, "Twist_Location", "XSec_1",   1.0 )
     vsp.SetParmVal( wing_id, "SectTess_U",     "XSec_1",   wing_span_res)
     vsp.SetParmVal( wing_id, "Tess_W",         "Shape",    wing_chord_res)
+    vsp.SetParmVal( wing_id, "Y_Rel_Rotation", "XForm",    angle)
     
     # Airfoil selection    
     root_xsec_surf = vsp.GetXSecSurf(wing_id, 0)
