@@ -1,6 +1,7 @@
 import os
 import openvsp as vsp # type: ignore
 import pyvista as pv
+import shutil
 import numpy as np
 import pandas as pd
 import csv
@@ -10,24 +11,14 @@ from dash import Dash, dcc, html
 
 vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
-wing_span_res = 10
-wing_chord_res = 25
+PLANE = r"C:\Users\kprah\Desktop\Prahaas\Projects\UAV 2\v2\UAV4.vsp3"
+Sref = 0.118
+bref = 0.7
+cref = 0.171
+x_cg = 0.112
+
 velocities = list(range(10, 50, 5)) # m/s
 alphas = list(range(-5, 15, 1)) # degrees AoA
-
-airfoil_file = r"Airfoils\pw75.dat"
-
-root_chord = 0.21
-taper_ratio = 0.6
-sweep = 0.0
-dihedral = 3.0
-twist = 0.0
-span = 0.7
-x_cg = 0.03
-angle = 3.5
-elevon_length = 0.3         # % of chord
-elevon_start = 0.3          # % of wingspan
-elevon_end = 0.9            # % of wingspan
 
 def main():
     try:
@@ -35,15 +26,12 @@ def main():
         os.remove("stability.csv")
     except OSError:
         pass
-    Sref = 0.5 * (root_chord + root_chord * taper_ratio) * span
-    bref = span
-    cref = root_chord
 
     # Aero sweep
     csv_exists = False
     for v in velocities:
         print(f"\n=== Running VSP Aero Sweep at {v} m/s ===")
-        stl_path, vsp3_path = generate_wing("wing")
+        vsp3_path = shutil.copy(PLANE, "wing.vsp3")
         CL, CD, CDi, Cm = vsp_sweep(vsp3_path, v, Sref, bref, cref)
         lift = [0.5 * 1.225 * (v ** 2) * Sref * cl_val for cl_val in CL]
         drag = [0.5 * 1.225 * (v ** 2) * Sref * cd_val for cd_val in CD]
@@ -73,7 +61,7 @@ def main():
     stab_csv_exists = False
     
     for v in velocities:
-        stl_path, vsp3_path = generate_wing("wing")
+        vsp3_path = shutil.copy(PLANE, "wing.vsp3")
         vsp_stability(vsp3_path, v, Sref, bref, cref)
         stab_dict = read_stability()
         
@@ -93,79 +81,6 @@ def main():
                 os.remove(filename)
             except OSError:
                 pass
-
-def generate_wing(wing_name):
-    tip_chord = root_chord * taper_ratio
-    airfoil_fwd = airfoil_file.replace("\\", "/")
-
-    vsp.VSPCheckSetup()
-    vsp.ClearVSPModel()
-    wing_id = vsp.AddGeom( "WING" )
-    vsp.SetParmVal( wing_id, "TotalSpan",      "WingGeom", span)
-    vsp.SetParmVal( wing_id, "Root_Chord",     "XSec_1",   root_chord)
-    vsp.SetParmVal( wing_id, "Tip_Chord",      "XSec_1",   tip_chord)
-    vsp.SetParmVal( wing_id, "Sweep",          "XSec_1",   sweep)
-    vsp.SetParmVal( wing_id, "Dihedral",       "XSec_1",   dihedral)
-    vsp.SetParmVal( wing_id, "Twist",          "XSec_1",   twist)
-    vsp.SetParmVal( wing_id, "Twist_Location", "XSec_1",   1.0 )
-    vsp.SetParmVal( wing_id, "SectTess_U",     "XSec_1",   wing_span_res)
-    vsp.SetParmVal( wing_id, "Tess_W",         "Shape",    wing_chord_res)
-    vsp.SetParmVal( wing_id, "Y_Rel_Rotation", "XForm",    angle)
-    
-    # Airfoil selection    
-    root_xsec_surf = vsp.GetXSecSurf(wing_id, 0)
-    vsp.ChangeXSecShape(root_xsec_surf, 0, vsp.XS_FILE_AIRFOIL)
-    root_xsec = vsp.GetXSec(root_xsec_surf, 0)
-    vsp.ReadFileAirfoil(root_xsec, airfoil_file)
-    
-    tip_xsec_surf = vsp.GetXSecSurf(wing_id, 1)
-    vsp.ChangeXSecShape(tip_xsec_surf, 1, vsp.XS_FILE_AIRFOIL)
-    tip_xsec = vsp.GetXSec(tip_xsec_surf, 1)
-    vsp.ReadFileAirfoil(tip_xsec, airfoil_file)
-    
-    vsp.SetSetFlag(wing_id, 1, True)
-    
-    # Control surfaces
-    elevon_id = vsp.AddSubSurf(wing_id, vsp.SS_CONTROL)
-    vsp.SetSubSurfName(elevon_id, "Elevons")
-    vsp.SetParmVal(wing_id, "EtaFlag", "SS_Control_1", 1.0)
-    vsp.SetParmVal(wing_id, "EtaStart", "SS_Control_1", elevon_start)
-    vsp.SetParmVal(wing_id, "EtaEnd", "SS_Control_1", elevon_end)
-    vsp.SetParmVal(wing_id, "SE_Const_Flag", "SS_Control_1", 1.0)
-    vsp.SetParmVal(wing_id, "Length_C_Start", "SS_Control_1", elevon_length)
-    cs_pitch_id = vsp.CreateVSPAEROControlSurfaceGroup() # Pitch
-    vsp.SetVSPAEROControlGroupName("Pitch", cs_pitch_id)
-    vsp.AddAllToVSPAEROControlSurfaceGroup(cs_pitch_id)
-    cs_roll_id = vsp.CreateVSPAEROControlSurfaceGroup() # Roll
-    vsp.SetVSPAEROControlGroupName("Roll", cs_roll_id)
-    vsp.AddAllToVSPAEROControlSurfaceGroup(cs_roll_id)
-    vsp.Update()
-    container_id = vsp.FindContainer("VSPAEROSettings", 0)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{elevon_id}_0_Gain", "ControlSurfaceGroup_0"), 1.0)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{elevon_id}_1_Gain", "ControlSurfaceGroup_0"), -1.0)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{elevon_id}_0_Gain", "ControlSurfaceGroup_1"), 1.0)
-    vsp.SetParmVal(vsp.FindParm(container_id, f"Surf_{elevon_id}_1_Gain", "ControlSurfaceGroup_1"), 1.0)
-
-    # Finalize and export
-    vsp.Update()
-    stl_path = f"{wing_name}.stl"
-    analysis_path = f"{wing_name}.vsp3"
-    vsp.WriteVSPFile(analysis_path)
-    vsp.ExportFile(stl_path, 0, vsp.EXPORT_STL)
-
-    return stl_path, analysis_path
-
-def visualize_stl(stl_path):
-    if os.path.exists(stl_path):
-        mesh = pv.read(stl_path)
-        plotter = pv.Plotter(title="Delta Wing")
-        plotter.add_mesh(mesh, color="lightblue", show_edges=True, smooth_shading=True)
-        plotter.add_axes()
-        plotter.add_floor(face='-z', i_resolution=10, j_resolution=10, color='gray', opacity=0.2)
-        print("Opening PyVista window...")
-        plotter.show()
-    else:
-        print("Error: STL not found.")
 
 def vsp_sweep(vsp3_path, v, Sref, bref, cref):
     mach = v / 343.0
@@ -260,8 +175,8 @@ def read_stability(stab_file_path="wing.stab"):
             "p": headers.index("p"),
             "q": headers.index("q"),
             "r": headers.index("r"),
-            "ConGrp_1": headers.index("ConGrp_1"),
-            "ConGrp_2": headers.index("ConGrp_2")
+            # "Congrp_1": headers.index("Congrp_1"),
+            # "Congrp_2": headers.index("Congrp_2")
         }
 
         for line in lines[header_idx+1:]:
@@ -275,16 +190,16 @@ def read_stability(stab_file_path="wing.stab"):
                     vsp_dict["Cl_beta"] = float(parts[col["Beta"]])
                     vsp_dict["Cl_p"]    = float(parts[col["p"]])
                     vsp_dict["Cl_r"]    = float(parts[col["r"]])
-                    vsp_dict["Cl_da"]   = float(parts[col["ConGrp_2"]]) # Roll authority
+                    # vsp_dict["Cl_da"]   = float(parts[col["Congrp_2"]]) # Roll authority
                 elif coef == "CMm":
                     vsp_dict["Cm_alpha"] = float(parts[col["Alpha"]])
                     vsp_dict["Cm_q"]     = float(parts[col["q"]])
-                    vsp_dict["Cm_de"]    = float(parts[col["ConGrp_1"]]) # Pitch authority
+                    # vsp_dict["Cm_de"]    = float(parts[col["Congrp_1"]]) # Pitch authority
                 elif coef == "CMn":
                     vsp_dict["Cn_beta"]  = float(parts[col["Beta"]])
                     vsp_dict["Cn_p"]     = float(parts[col["p"]])
                     vsp_dict["Cn_r"]     = float(parts[col["r"]])
-                    vsp_dict["Cn_da"]    = float(parts[col["ConGrp_2"]]) # Adverse Yaw
+                    # vsp_dict["Cn_da"]    = float(parts[col["Congrp_2"]]) # Adverse Yaw
             except IndexError:
                 pass
 
@@ -396,6 +311,6 @@ def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     return app
 
 if __name__ == '__main__':
-    # main()
+    main()
     app = plot_dashboards()
     app.run(debug=True)
