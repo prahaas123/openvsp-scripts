@@ -11,11 +11,11 @@ from dash import Dash, dcc, html
 
 vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
-PLANE = r"C:\Users\kprah\Desktop\Prahaas\Projects\UAV 2\v2\UAV4.vsp3"
+PLANE = r"UAV4.vsp3"
 Sref = 0.118
 bref = 0.7
 cref = 0.171
-x_cg = 0.112
+x_cg = 0.05
 
 velocities = list(range(10, 50, 5)) # m/s
 alphas = list(range(-5, 15, 1)) # degrees AoA
@@ -312,5 +312,5 @@ def plot_dashboards(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
 
 if __name__ == '__main__':
     main()
-    app = plot_dashboards()
-    app.run(debug=True)
+    # app = plot_dashboards()
+    # app.run(debug=True)
