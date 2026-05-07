@@ -2,8 +2,8 @@ import os
 import pyvista as pv
 import csv
 import glob
-import subprocess
 import numpy as np
+import openvsp as vsp # type: ignore
 
 vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
@@ -31,7 +31,7 @@ htail_params = {
     "l_H": 0.65,        # [m] Tail Moment Arm (Distance from CG to Tail AC)
     "airfoil": "0012",
     "span": 0.383,
-    "alpha": 0.9423
+    "alpha": 3.35
 }
 
 vtail_params = {
@@ -94,11 +94,10 @@ def main():
         stl_path, vsp3_path = generate_wing_and_tail("plane")
         vsp_stability(vsp3_path, v, Sref, bref, cref)
         stab_dict = read_stability("plane.stab")
-        sm = get_sm("plane.stab", cg=x_cg, mac=cref)
         
         stability_filename = "stability.csv"
-        stab_headers = ["Velocity"] + list(stab_dict.keys()) + ["StaticMargin"]
-        stab_columns = [v] + list(stab_dict.values()) + [sm]
+        stab_headers = ["Velocity"] + list(stab_dict.keys())
+        stab_columns = [v] + list(stab_dict.values())
         
         with open(stability_filename, 'a', newline='') as f:
             writer = csv.writer(f)
@@ -123,113 +122,59 @@ def generate_wing_and_tail(plane_name):
     h_camber, h_cam_loc, h_thick = naca4(htail_params["airfoil"])
     v_camber, v_cam_loc, v_thick = naca4(vtail_params["airfoil"])
 
-    script_lines = [
-        "void main() {",
-        "    VSPCheckSetup();",
-        "    ClearVSPModel();",
+    # Main Wing
+    wid = vsp.AddGeom("WING", "")
+    vsp.SetGeomName(wid, "MainWing")
+    vsp.SetParmVal(wid, "TotalSpan", "WingGeom", wing_params["span"])
+    vsp.SetParmVal(wid, "Root_Chord", "XSec_1", wing_params["root_chord"])
+    vsp.SetParmVal(wid, "Tip_Chord", "XSec_1", tip_chord)
+    vsp.SetParmVal(wid, "Sweep", "XSec_1", wing_params["sweep"])
+    vsp.SetParmVal(wid, "Dihedral", "XSec_1", wing_params["dihedral"])
+    vsp.SetParmVal(wid, "Twist", "XSec_1", wing_params["twist"])
+    vsp.SetParmVal(wid, "Y_Rel_Rotation", "XForm", wing_params["alpha"])
+    vsp.SetParmVal(wid, "SectTess_U", "XSec_1", float(wing_span_res))
+    vsp.SetParmVal(wid, "Tess_W", "Shape", float(wing_chord_res))
+    
+    for i in [0, 1]:
+        surf = vsp.GetXSecSurf(wid, i)
+        vsp.ChangeXSecShape(surf, 0, vsp.XS_FILE_AIRFOIL)
+        vsp.ReadFileAirfoil(vsp.GetXSec(surf, 0), airfoil_fwd)
+    vsp.SetSetFlag(wid, 1, True)
 
-        # ---- Main wing ----
-        '    string wing_id = AddGeom( "WING" );',
-        '    SetGeomName( wing_id, "MainWing" );',
-        f'    SetParmVal( wing_id, "TotalSpan",      "WingGeom", {wing_params["span"]} );',
-        f'    SetParmVal( wing_id, "Root_Chord",     "XSec_1",   {wing_params["root_chord"]} );',
-        f'    SetParmVal( wing_id, "Tip_Chord",      "XSec_1",   {tip_chord} );',
-        f'    SetParmVal( wing_id, "Sweep",          "XSec_1",   {wing_params["sweep"]} );',
-        f'    SetParmVal( wing_id, "Dihedral",       "XSec_1",   {wing_params["dihedral"]} );',
-        f'    SetParmVal( wing_id, "Twist",          "XSec_1",   {wing_params["twist"]} );',
-        f'    SetParmVal( wing_id, "Twist_Location", "XSec_1",   1.0 );',
-        f'    SetParmVal( wing_id, "Y_Rel_Rotation", "XForm",    {wing_params["alpha"]} );',
-        f'    SetParmVal( wing_id, "SectTess_U",     "XSec_1",   {wing_span_res}.0 );',
-        f'    SetParmVal( wing_id, "Tess_W",         "Shape",    {wing_chord_res}.0 );',
-        '    string w_root_surf = GetXSecSurf( wing_id, 0 );',
-        '    ChangeXSecShape( w_root_surf, 0, XS_FILE_AIRFOIL );',
-        '    string w_root_xsec = GetXSec( w_root_surf, 0 );',
-        f'    ReadFileAirfoil( w_root_xsec, "{airfoil_fwd}" );',
-        '    string w_tip_surf = GetXSecSurf( wing_id, 1 );',
-        '    ChangeXSecShape( w_tip_surf, 1, XS_FILE_AIRFOIL );',
-        '    string w_tip_xsec = GetXSec( w_tip_surf, 1 );',
-        f'    ReadFileAirfoil( w_tip_xsec, "{airfoil_fwd}" );',
-        '    AddSubSurf( wing_id, SS_CONTROL );',
-        '    SetParmVal( wing_id, "SE_Const_Flag",  "SS_Control_1", 1.0 );',
-        '    SetParmVal( wing_id, "Length_C_Start", "SS_Control_1", 0.2 );',
-        '    SetParmVal( wing_id, "EtaFlag",        "SS_Control_1", 1.0 );',
-        '    SetParmVal( wing_id, "EtaStart",       "SS_Control_1", 0.2 );',
-        '    SetParmVal( wing_id, "EtaEnd",         "SS_Control_1", 0.8 );',
-        '    SetSetFlag( wing_id, 1, true );',
+    # Horizontal Tail
+    hid = vsp.AddGeom("WING", "")
+    vsp.SetGeomName(hid, "HorizontalTail")
+    vsp.SetParmVal(hid, "TotalSpan", "WingGeom", htail_params["span"])
+    vsp.SetParmVal(hid, "Root_Chord", "XSec_1", htail_params["chord"])
+    vsp.SetParmVal(hid, "Tip_Chord", "XSec_1", htail_params["chord"])
+    vsp.SetParmVal(hid, "Sweep", "XSec_1", 0.0)
+    vsp.SetParmVal(hid, "X_Rel_Location", "XForm", htail_params["l_H"])
+    vsp.SetParmVal(hid, "Y_Rel_Rotation", "XForm", htail_params["alpha"])
+    vsp.SetParmVal(hid, "Camber", "XSecCurve_0", h_camber)
+    vsp.SetParmVal(hid, "CamberLoc", "XSecCurve_0", h_cam_loc)
+    vsp.SetParmVal(hid, "ThickChord", "XSecCurve_0", h_thick)
+    vsp.SetSetFlag(hid, 1, True)
 
-        # ---- Horizontal tail ----
-        '    string htail_id = AddGeom( "WING" );',
-        '    SetGeomName( htail_id, "HorizontalTail" );',
-        f'    SetParmVal( htail_id, "TotalSpan",      "WingGeom", {htail_params["span"]} );',
-        f'    SetParmVal( htail_id, "Root_Chord",     "XSec_1",   {htail_params["chord"]} );',
-        f'    SetParmVal( htail_id, "Tip_Chord",      "XSec_1",   {htail_params["chord"]} );',
-        '    SetParmVal( htail_id, "Sweep",           "XSec_1",   0.0 );',
-        '    SetParmVal( htail_id, "Dihedral",        "XSec_1",   0.0 );',
-        '    SetParmVal( htail_id, "Twist",           "XSec_1",   0.0 );',
-        f'    SetParmVal( htail_id, "SectTess_U",     "XSec_1",   {wing_span_res}.0 );',
-        f'    SetParmVal( htail_id, "Tess_W",         "Shape",    {wing_chord_res}.0 );',
-        f'    SetParmVal( htail_id, "X_Rel_Location", "XForm",    {htail_params["l_H"]} );',
-        f'    SetParmVal( htail_id, "Y_Rel_Rotation", "XForm",    {htail_params["alpha"]} );',
-        f'    SetParmVal( htail_id, "Camber",         "XSecCurve_0", {h_camber} );',
-        f'    SetParmVal( htail_id, "CamberLoc",      "XSecCurve_0", {h_cam_loc} );',
-        f'    SetParmVal( htail_id, "ThickChord",     "XSecCurve_0", {h_thick} );',
-        f'    SetParmVal( htail_id, "Camber",         "XSecCurve_1", {h_camber} );',
-        f'    SetParmVal( htail_id, "CamberLoc",      "XSecCurve_1", {h_cam_loc} );',
-        f'    SetParmVal( htail_id, "ThickChord",     "XSecCurve_1", {h_thick} );',
-        '    AddSubSurf( htail_id, SS_CONTROL );',
-        '    SetParmVal( htail_id, "SE_Const_Flag",  "SS_Control_1", 1.0 );',
-        '    SetParmVal( htail_id, "Length_C_Start", "SS_Control_1", 0.25 );',
-        '    SetParmVal( htail_id, "EtaFlag",        "SS_Control_1", 1.0 );',
-        '    SetParmVal( htail_id, "EtaStart",       "SS_Control_1", 0.0 );',
-        '    SetParmVal( htail_id, "EtaEnd",         "SS_Control_1", 0.8 );',
-        '    SetSetFlag( htail_id, 1, true );',
+    # Vertical Tail
+    vid = vsp.AddGeom("WING", "")
+    vsp.SetGeomName(vid, "VerticalTail")
+    vsp.SetParmVal(vid, "Sym_Planar_Flag", "Sym", 0.0)
+    vsp.SetParmVal(vid, "TotalSpan", "WingGeom", vtail_params["span"])
+    vsp.SetParmVal(vid, "Root_Chord", "XSec_1", vtail_params["chord"])
+    vsp.SetParmVal(vid, "Tip_Chord", "XSec_1", vtail_tip)
+    vsp.SetParmVal(vid, "Sweep", "XSec_1", 0.0)
+    vsp.SetParmVal(vid, "X_Rel_Location", "XForm", htail_params["l_H"])
+    vsp.SetParmVal(vid, "X_Rel_Rotation", "XForm", 90.0)
+    vsp.SetParmVal(vid, "Camber", "XSecCurve_0", v_camber)
+    vsp.SetParmVal(vid, "CamberLoc", "XSecCurve_0", v_cam_loc)
+    vsp.SetParmVal(vid, "ThickChord", "XSecCurve_0", v_thick)
+    vsp.SetSetFlag(vid, 1, True)
 
-        # ---- Vertical tail ----
-        '    string vtail_id = AddGeom( "WING" );',
-        '    SetGeomName( vtail_id, "VerticalTail" );',
-        '    SetParmVal( vtail_id, "Sym_Planar_Flag", "Sym",      0.0 );',
-        f'    SetParmVal( vtail_id, "TotalSpan",      "WingGeom", {vtail_params["span"]} );',
-        f'    SetParmVal( vtail_id, "Root_Chord",     "XSec_1",   {vtail_params["chord"]} );',
-        f'    SetParmVal( vtail_id, "Tip_Chord",      "XSec_1",   {vtail_tip} );',
-        f'    SetParmVal( vtail_id, "Sweep",          "XSec_1",   {vtail_params["sweep"]} );',
-        f'    SetParmVal( vtail_id, "Dihedral",        "XSec_1",   0.0 );',
-        f'    SetParmVal( vtail_id, "Twist",           "XSec_1",   0.0 );',
-        f'    SetParmVal( vtail_id, "SectTess_U",     "XSec_1",   {wing_span_res}.0 );',
-        f'    SetParmVal( vtail_id, "Tess_W",         "Shape",    {wing_chord_res}.0 );',
-        f'    SetParmVal( vtail_id, "X_Rel_Location", "XForm",    {htail_params["l_H"]} );',
-        f'    SetParmVal( vtail_id, "X_Rel_Rotation",  "XForm",    90.0 );',
-        f'    SetParmVal( vtail_id, "Camber",         "XSecCurve_0", {v_camber} );',
-        f'    SetParmVal( vtail_id, "CamberLoc",      "XSecCurve_0", {v_cam_loc} );',
-        f'    SetParmVal( vtail_id, "ThickChord",     "XSecCurve_0", {v_thick} );',
-        f'    SetParmVal( vtail_id, "Camber",         "XSecCurve_1", {v_camber} );',
-        f'    SetParmVal( vtail_id, "CamberLoc",      "XSecCurve_1", {v_cam_loc} );',
-        f'    SetParmVal( vtail_id, "ThickChord",     "XSecCurve_1", {v_thick} );',
-        f'    AddSubSurf( vtail_id, SS_CONTROL );',
-        f'    SetParmVal( vtail_id, "SE_Const_Flag",  "SS_Control_1", 1.0 );',
-        f'    SetParmVal( vtail_id, "Length_C_Start", "SS_Control_1", 0.35 );',
-        f'    SetParmVal( vtail_id, "EtaFlag",        "SS_Control_1", 1.0 );',
-        f'    SetParmVal( vtail_id, "EtaStart",       "SS_Control_1", 0.2 );',
-        f'    SetParmVal( vtail_id, "EtaEnd",         "SS_Control_1", 0.8 );',
-        f'    SetSetFlag( vtail_id, 1, true );',
-
-        f'    Update();',
-        f'    WriteVSPFile( "{plane_name}.vsp3", SET_ALL );',
-        f'    ExportFile( "{plane_name}.stl", 0, EXPORT_STL );',
-        "}",
-    ]
-
-    script_path = f"{plane_name}_geom.vspscript"
-    with open(script_path, 'w') as f:
-        f.write("\n".join(script_lines))
-
-    print(f"--- Running geometry generation ({script_path}) ---")
-    subprocess.run([vsp_exe, "-script", script_path], check=True)
-    os.remove(script_path)
-
-    stl_path  = f"{plane_name}.stl"
+    vsp.Update()
     vsp3_path = f"{plane_name}.vsp3"
-    print(f"STL generated: {stl_path}")
-    print(f"VSP file saved: {vsp3_path}")
+    stl_path = f"{plane_name}.stl"
+    vsp.WriteVSPFile(vsp3_path)
+    vsp.ExportFile(stl_path, 0, vsp.EXPORT_STL)
     return stl_path, vsp3_path
 
 def visualize_stl(stl_path):
@@ -247,97 +192,69 @@ def visualize_stl(stl_path):
 def vsp_sweep(vsp3_path, velocity, Sref, bref, cref):
     mach = velocity / 343.0
 
-    script_lines = [
-        "void main() {",
-        f'    ClearVSPModel();',
-        f'    ReadVSPFile( "{vsp3_path}" );',
-        f'    SetAnalysisInputDefaults( "VSPAEROComputeGeometry" );',
-        f'    array< int > thick_set = GetIntAnalysisInput( "VSPAEROComputeGeometry", "GeomSet" );',
-        f'    array< int > thin_set = GetIntAnalysisInput( "VSPAEROComputeGeometry", "ThinGeomSet" );',
-        f'    thick_set[0] = ( SET_TYPE::SET_NONE );',
-        f'    thin_set[0] = ( SET_TYPE::SET_ALL );',
-        f'    Print( "--- Running Meshing ---" );',
-        f'    ExecAnalysis( "VSPAEROComputeGeometry" );',
-        f'    SetAnalysisInputDefaults( "VSPAEROSweep" );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Sref",           {darr(Sref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "cref",           {darr(cref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "bref",           {darr(bref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaStart",     {darr(float(alphas[0]))}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaEnd",       {darr(float(alphas[-1]))}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "AlphaNpts",      {iarr(len(alphas))}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "MachStart",      {darr(mach)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "MachNpts",       {iarr(1)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Vinf",           {darr(velocity)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Xcg",            {darr(x_cg)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "WakeNumIter",    {iarr(15)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "NCPU",           {iarr(8)}, 0 );',
-        f'    Print( "--- Running Aero Sweep ---" );',
-        f'    SetStringAnalysisInput( "VSPAEROSweep", "RedirectFile", array<string> = {{"{vsp3_path}_log.txt"}}, 0 );',
-        f'    ExecAnalysis( "VSPAEROSweep" );',
-        "}",
-    ]
+    # Meshing    
+    vsp.ClearVSPModel()
+    vsp.ReadVSPFile(vsp3_path)
+    geom_analysis = "VSPAEROComputeGeometry"
+    vsp.SetAnalysisInputDefaults(geom_analysis)
+    vsp.SetIntAnalysisInput(geom_analysis, "GeomSet", [vsp.SET_NONE])      
+    vsp.SetIntAnalysisInput(geom_analysis, "ThinGeomSet", [vsp.SET_SHOWN])
+    vsp.ExecAnalysis(geom_analysis)
+    
+    # Aero Analysis
+    aero_analysis = "VSPAEROSweep"
+    vsp.SetAnalysisInputDefaults(aero_analysis)
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Sref", [Sref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "cref", [cref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "bref", [bref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "AlphaStart", [alphas[0]])
+    vsp.SetIntAnalysisInput(aero_analysis, "AlphaNpts", [len(alphas)])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "AlphaEnd", [alphas[-1]])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "MachStart", [mach])
+    vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
+    vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [6]) 
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [v])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
+    vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
+    vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", [f"{vsp3_path}_log.txt"])
+    rid = vsp.ExecAnalysis(aero_analysis)
 
-    script_path = "plane_sweep.vspscript"
-    with open(script_path, 'w') as f:
-        f.write("\n".join(script_lines))
+    # Results
+    polar_res = vsp.FindLatestResultsID("VSPAERO_Polar")
+    cl = vsp.GetDoubleResults(polar_res, "CLtot")
+    cd = vsp.GetDoubleResults(polar_res, "CDtot")
+    cdi = vsp.GetDoubleResults(polar_res, "CDi")
+    cm = vsp.GetDoubleResults(polar_res, "CMytot")
+    return cl, cd, cdi, cm
 
-    print(f"--- Running aero sweep ({script_path}) ---")
-    subprocess.run([vsp_exe, "-script", script_path], check=True)
-    os.remove(script_path)
+def vsp_stability(vsp3_path, v, Sref, bref, cref):
+    # Load model
+    vsp.ReadVSPFile(vsp3_path)
+    geom_analysis = "VSPAEROComputeGeometry"
+    vsp.SetAnalysisInputDefaults(geom_analysis)   
+    vsp.SetIntAnalysisInput(geom_analysis, "GeomSet", [vsp.SET_NONE])      
+    vsp.SetIntAnalysisInput(geom_analysis, "ThinGeomSet", [vsp.SET_SHOWN])
+    vsp.ExecAnalysis(geom_analysis)
 
-    CL, CD, CDi, Cm = parse_polar("plane.polar")
-    return CL, CD, CDi, Cm
-
-def vsp_stability(vsp3_path, velocity, Sref, bref, cref):
-    mach = velocity / 343.0
-
-    script_lines = [
-        "void main() {",
-        f'    ReadVSPFile( "{vsp3_path}" );',
-        f'    SetAnalysisInputDefaults( "VSPAEROComputeGeometry" );',
-        f'    array< int > thick_set = GetIntAnalysisInput( "VSPAEROComputeGeometry", "GeomSet" );',
-        f'    array< int > thin_set = GetIntAnalysisInput( "VSPAEROComputeGeometry", "ThinGeomSet" );',
-        f'    thick_set[0] = ( SET_TYPE::SET_NONE );',
-        f'    thin_set[0] = ( SET_TYPE::SET_ALL );',
-        f'    AutoGroupVSPAEROControlSurfaces();',
-        f'    Update();',
-        f'    string container_id = FindContainer( "VSPAEROSettings", 0 );',
-        f'    array<string> geoms = FindGeoms();',
-        f'    string htail_id = geoms[1];',
-        f'    string elev_cs_id = GetSubSurf( htail_id, 0 );',
-        f'    string elev_parm = FindParm( container_id, "Surf_" + elev_cs_id + "_1_Gain", "HorizontalTail_SS_CONT_0" );',
-        f'    SetParmVal( elev_parm, -1.0 );',
-        f'    Update();',
-        f'    Print( "--- Running Meshing (stability) ---" );',
-        f'    ExecAnalysis( "VSPAEROComputeGeometry" );',
-        f'    SetAnalysisInputDefaults( "VSPAEROSweep" );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Sref",           {darr(Sref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "cref",           {darr(cref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "bref",           {darr(bref)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaStart",     {darr(0.0)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "AlphaEnd",       {darr(0.0)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "AlphaNpts",      {iarr(1)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "MachStart",      {darr(mach)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "MachNpts",       {iarr(1)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Vinf",           {darr(velocity)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Xcg",            {darr(x_cg)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "WakeNumIter",    {iarr(15)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "UnsteadyType",   {iarr(1)}, 0 );',
-        f'    SetDoubleAnalysisInput( "VSPAEROSweep", "Rho",            {darr(1.225)}, 0 );',
-        f'    SetIntAnalysisInput(    "VSPAEROSweep", "NCPU",           {iarr(8)}, 0 );',
-        f'    Print( "--- Running Stability Sweep ---" );',
-        f'    SetStringAnalysisInput( "VSPAEROSweep", "RedirectFile", array<string> = {{"{vsp3_path}_log.txt"}}, 0 );',
-        f'    ExecAnalysis( "VSPAEROSweep" );',
-        "}",
-    ]
-
-    script_path = "plane_stab.vspscript"
-    with open(script_path, 'w') as f:
-        f.write("\n".join(script_lines))
-
-    print(f"--- Running stability sweep ({script_path}) ---")
-    subprocess.run([vsp_exe, "-script", script_path], check=True)
-    os.remove(script_path)
+    # Stability Sweep
+    aero_analysis = "VSPAEROSweep"
+    vsp.SetAnalysisInputDefaults(aero_analysis)
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Sref", [Sref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "cref", [cref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "bref", [bref])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "AlphaStart", [0.0])
+    vsp.SetIntAnalysisInput(aero_analysis, "AlphaNpts", [1])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "AlphaEnd", [0.0])
+    mach = v / 343.0
+    vsp.SetDoubleAnalysisInput(aero_analysis, "MachStart", [mach])
+    vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
+    vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [6]) 
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [100.0])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
+    vsp.SetIntAnalysisInput(aero_analysis, "UnsteadyType", [1])
+    vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
+    vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", [f"{vsp3_path}_log.txt"])
+    vsp.ExecAnalysis(aero_analysis)
 
 def parse_polar(polar_path):
     CL, CD, CDi, Cm = [], [], [], []
@@ -467,30 +384,6 @@ def compute_oswald(cl, cdi, s, b):
     if e.ndim == 0:
         return float(e)
     return e
-    
-def get_sm(stab_path, cg=x_cg, mac=1.0):
-    with open(stab_path, 'r') as f:
-        for line in f:
-            stripped = line.strip()
-            
-            if stripped.startswith('X_np'):
-                parts = stripped.split()
-                try:
-                    np_val = float(parts[1])
-                    sm = (np_val - cg) / mac
-                    return sm
-                    
-                except (ValueError, IndexError):
-                    return float('nan')
-                    
-    return float('nan')
-    
-# AngelScript array literal helpers
-def iarr(v):
-    return f"array<int> = {{{v}}}"
-
-def darr(v):
-    return f"array<double> = {{{v}}}"
 
 if __name__ == "__main__":
     main()

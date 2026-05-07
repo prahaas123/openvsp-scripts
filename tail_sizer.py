@@ -175,6 +175,7 @@ def generate_wing_and_tail(plane_name, htail_b, htail_alpha, vtail_height):
     vsp.SetParmVal(hid, "X_Rel_Location", "XForm", htail_params["l_H"])
     vsp.SetParmVal(hid, "Y_Rel_Rotation", "XForm", htail_alpha)
     vsp.SetParmVal(hid, "Camber", "XSecCurve_0", h_camber)
+    vsp.SetParmVal(hid, "CamberLoc", "XSecCurve_0", h_cam_loc)
     vsp.SetParmVal(hid, "ThickChord", "XSecCurve_0", h_thick)
     vsp.SetSetFlag(hid, 1, True)
 
@@ -189,6 +190,7 @@ def generate_wing_and_tail(plane_name, htail_b, htail_alpha, vtail_height):
     vsp.SetParmVal(vid, "X_Rel_Location", "XForm", htail_params["l_H"])
     vsp.SetParmVal(vid, "X_Rel_Rotation", "XForm", 90.0)
     vsp.SetParmVal(vid, "Camber", "XSecCurve_0", v_camber)
+    vsp.SetParmVal(vid, "CamberLoc", "XSecCurve_0", v_cam_loc)
     vsp.SetParmVal(vid, "ThickChord", "XSecCurve_0", v_thick)
     vsp.SetSetFlag(vid, 1, True)
 
