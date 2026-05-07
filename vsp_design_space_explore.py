@@ -9,9 +9,7 @@ from tqdm import tqdm
 import plotly.express as px
 import plotly.graph_objects as go
 
-vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
-
-wing_span_res = 15
+wing_span_res = 10
 wing_chord_res = 25
 velocity = 20 # m/s
 alpha = 3 # degrees AoA

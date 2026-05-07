@@ -4,10 +4,10 @@ Python scripts to automate aerodynamic analysis and concept design workflows usi
 
 ---
 
-## OpenVSP Setup
+## Setup
 
 - Install [OpenVSP 3.47.0+](http://openvsp.org/)
-- Set `vsp_exe` path at the top of each script
+- Create a venv and compile the openvsp Python API
 
 ---
 
@@ -39,18 +39,16 @@ Automated horizontal tail sizing and pitch trim analysis using a secant method i
 - Sizes the horizontal tail area from a target tail volume coefficient (`V_H`)
 - Iteratively adjusts tail incidence angle until the pitching moment coefficient `CMy ≈ 0` at the design alpha
 - Reports final trim incidence, tail chord, and tail span
-- Visualizes the trimmed configuration
 
 ---
 
 ### `vsp_single_design_delta.py`
 
-Runs a full aero + stability analysis on a tailless delta wing configuration.
+Runs a full aero + stability analysis on a tailless flying/delta wing configuration.
 
-- Builds a delta wing geometry with a custom airfoil (DAE-21) and elevons
-- Runs a VSPAERO VLM sweep across an alpha range and writes polar results to `cfd_sweep.csv`
-- Runs a stability derivative analysis and writes results to `vsp_derivatives.csv`
-- Visualizes the generated STL using PyVista
+- Takes in a `Wing.vsp3` custom flying wing geometry as input
+- Runs a VSPAERO VLM sweep across an alpha range and writes polar results to `aero_full.csv`
+- Runs a stability derivative analysis and writes results to `stability.csv`
 
 ---
 
@@ -58,10 +56,9 @@ Runs a full aero + stability analysis on a tailless delta wing configuration.
 
 Runs a full aero + stability analysis on a conventional aircraft configuration (wing + horizontal tail + vertical tail).
 
-- Builds a three-surface model with a wing, tails, and ailerons/elevators/rudder control surfaces
-- Runs a VSPAERO VLM sweep and writes polar results to `cfd_sweep.csv`
-- Runs a stability derivative analysis and writes results to `vsp_derivatives.csv`
-- Visualizes the generated STL using PyVista
+- Builds a conventional aircraft with a wing, tails, and ailerons/elevators/rudder control surfaces
+- Runs a VSPAERO VLM sweep and writes polar results to `aero_full.csv`
+- Runs a stability derivative analysis and writes results to `stability.csv`
 
 ---
 
@@ -71,24 +68,11 @@ Generates an aircraft constraint diagram by evaluating the required Thrust-to-We
 
 ---
 
-## How It Works
-
-Each script generates temporary `.vspscript` files (AngelScript) on the fly, executes them via:
-
-```Powershell
-vsp.exe -script <script_name>.vspscript
-```
-
-and then parses the output files (`.polar`, `.stab`) directly. Temporary scripts and intermediate VSP files are deleted automatically after each run.
-
----
-
 ## Configuration
 
 At the top of each script, set:
 
 ```python
-vsp_exe    = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"  # path to your vsp.exe
 airfoil_file = r"path\to\your\airfoil.dat"               # path to airfoil .dat file
 ```
 

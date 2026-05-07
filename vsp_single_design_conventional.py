@@ -6,8 +6,6 @@ import numpy as np
 import openvsp as vsp # type: ignore
 import shutil
 
-vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
-
 wing_span_res = 10
 wing_chord_res = 25
 velocities = list(range(10, 50, 5)) # m/s

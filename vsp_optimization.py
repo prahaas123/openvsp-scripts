@@ -7,8 +7,6 @@ import glob
 import uuid
 from scipy.optimize import differential_evolution, NonlinearConstraint
 
-vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
-
 wing_span_res = 10
 wing_chord_res = 25
 velocity = 20 # m/s

@@ -9,8 +9,6 @@ import glob
 import plotly.express as px
 from dash import Dash, dcc, html
 
-vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
-
 PLANE = r"UAV4.vsp3"
 Sref = 0.118
 bref = 0.7
