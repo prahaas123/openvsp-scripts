@@ -9,7 +9,7 @@ vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
 wing_span_res = 20
 wing_chord_res = 50
-velocities = [10] # m/s
+velocities = list(range(10, 50, 5)) # m/s
 alphas = list(range(-5, 15)) # degrees AoA
 
 airfoil_file = r"Airfoils\goe322.dat"
@@ -46,8 +46,12 @@ def main():
     bref = wing_params["span"]
     cref = wing_params["root_chord"]
     Sref = 0.5 * (cref + (cref * wing_params["taper"])) * bref
-    stl_path, vsp3_path = generate_wing_and_tail("plane")
-    visualize_stl(stl_path)
+    
+    try:
+        os.remove("aero_full.csv")
+        os.remove("stability.csv")
+    except OSError:
+        pass
 
     # Aero sweep
     csv_exists = False
@@ -176,18 +180,6 @@ def generate_wing_and_tail(plane_name):
     vsp.WriteVSPFile(vsp3_path)
     vsp.ExportFile(stl_path, 0, vsp.EXPORT_STL)
     return stl_path, vsp3_path
-
-def visualize_stl(stl_path):
-    if os.path.exists(stl_path):
-        mesh = pv.read(stl_path)
-        plotter = pv.Plotter(title="Conventional Plane")
-        plotter.add_mesh(mesh, color="lightblue", show_edges=True, smooth_shading=True)
-        plotter.add_axes()
-        plotter.add_floor(face='-z', i_resolution=10, j_resolution=10, color='gray', opacity=0.2)
-        print("Opening PyVista window...")
-        plotter.show()
-    else:
-        print("Error: STL not found.")
 
 def vsp_sweep(vsp3_path, velocity, Sref, bref, cref):
     mach = velocity / 343.0
