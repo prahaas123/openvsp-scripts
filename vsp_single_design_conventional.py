@@ -4,11 +4,12 @@ import csv
 import glob
 import numpy as np
 import openvsp as vsp # type: ignore
+import shutil
 
 vsp_exe = r"C:\Program Files\OpenVSP-3.47.0\vsp.exe"
 
-wing_span_res = 20
-wing_chord_res = 50
+wing_span_res = 10
+wing_chord_res = 25
 velocities = list(range(10, 50, 5)) # m/s
 alphas = list(range(-5, 15)) # degrees AoA
 
@@ -47,6 +48,8 @@ def main():
     cref = wing_params["root_chord"]
     Sref = 0.5 * (cref + (cref * wing_params["taper"])) * bref
     
+    _, PLANE = generate_wing_and_tail("Conventional")
+    
     try:
         os.remove("aero_full.csv")
         os.remove("stability.csv")
@@ -57,23 +60,15 @@ def main():
     csv_exists = False
     for v in velocities:
         print(f"\n=== Running VSP Aero Sweep at {v} m/s ===")
+        vsp3_path = shutil.copy(PLANE, "plane.vsp3")
         CL, CD, CDi, Cm = vsp_sweep(vsp3_path, v, Sref, bref, cref)
-        lod_filename = "plane.lod"
-        cl_data = read_lift_distribution(lod_filename)
-        first_aoa_key = list(cl_data.keys())[0]
-        span_locations = cl_data[first_aoa_key]['SoverB']
-        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm"] + [f"Cl_span_{loc:.4f}" for loc in span_locations] + ["Oswald_efficiency"]
+        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm", "Oswald_efficiency"]
 
-        # Combine sweep results with local spanwise results
         aero_results = []
         for i, alpha in enumerate(alphas):
-            e = [compute_oswald(CL[i], CDi[i], Sref, bref)]
-            base_row = [v, alpha, CL[i], CD[i], Cm[i]]
-            # Safely find the corresponding AoA in the parsed dictionary to avoid errors
-            closest_aoa_key = min(cl_data.keys(), key=lambda k: abs(k - alpha))
-            spanwise_cls = cl_data[closest_aoa_key]['Cl']
-            full_row = base_row + spanwise_cls + e
-            aero_results.append(full_row)
+            e = compute_oswald(CL[i], CDi[i], Sref, bref)
+            row = [v, alpha, CL[i], CD[i], Cm[i], e]
+            aero_results.append(row)
 
         # Write to CSV
         aero_filename = "aero_full.csv"
@@ -95,7 +90,7 @@ def main():
     stab_csv_exists = False
     
     for v in velocities:
-        stl_path, vsp3_path = generate_wing_and_tail("plane")
+        vsp3_path = shutil.copy(PLANE, "plane.vsp3")
         vsp_stability(vsp3_path, v, Sref, bref, cref)
         stab_dict = read_stability("plane.stab")
         
@@ -115,6 +110,12 @@ def main():
                 os.remove(filename)
             except OSError:
                 pass
+            
+    for filename in glob.glob("Conventional*"):
+        try:
+            os.remove(filename)
+        except OSError:
+            pass
 
 def generate_wing_and_tail(plane_name):
     airfoil_fwd  = airfoil_file.replace("\\", "/")
