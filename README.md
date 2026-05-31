@@ -68,6 +68,12 @@ Generates an aircraft constraint diagram by evaluating the required Thrust-to-We
 
 ---
 
+### `airfoil_coords_parser`
+
+Takes 2D cross sectional images of a given wing/body and creates a .dat airfoil file in Selig format. This is useful when trying to recreate complex CAD shapes in OpenVSP.
+
+---
+
 ## Configuration
 
 At the top of each script, set:
