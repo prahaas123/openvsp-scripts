@@ -138,10 +138,10 @@ def generate_wing_and_tail(plane_name):
     vsp.SetParmVal(wid, "SectTess_U", "XSec_1", float(wing_span_res))
     vsp.SetParmVal(wid, "Tess_W", "Shape", float(wing_chord_res))
     
+    surf = vsp.GetXSecSurf(wid, 0)
     for i in [0, 1]:
-        surf = vsp.GetXSecSurf(wid, i)
-        vsp.ChangeXSecShape(surf, 0, vsp.XS_FILE_AIRFOIL)
-        vsp.ReadFileAirfoil(vsp.GetXSec(surf, 0), airfoil_fwd)
+        vsp.ChangeXSecShape(surf, i, vsp.XS_FILE_AIRFOIL)
+        vsp.ReadFileAirfoil(vsp.GetXSec(surf, i), airfoil_file)
     vsp.SetSetFlag(wid, 1, True)
 
     # Horizontal Tail

@@ -17,8 +17,8 @@ moment_tolerance = 0.05
 tail_sizing_iterations = 10
 
 wing_params = {
-    "span": 1.19,
-    "root_chord": 0.225,
+    "span": 1.02,
+    "root_chord": 0.27,
     "taper": 1.0,
     "sweep": 0.0,
     "dihedral": 0.0,
@@ -27,8 +27,8 @@ wing_params = {
 }
 
 htail_params = {
-    "V_H": 0.10,
-    "l_H": 0.65,
+    "V_H": 0.6,
+    "l_H": 0.52,
     "airfoil": "0012",
     "aspect_ratio": 3.0
 }
@@ -123,11 +123,10 @@ def generate_wing(wing_name):
     vsp.SetParmVal(wing_id, "SectTess_U", "XSec_1", float(wing_span_res))
     vsp.SetParmVal(wing_id, "Tess_W", "Shape", float(wing_chord_res))
 
+    surf = vsp.GetXSecSurf(wing_id, 0)
     for i in [0, 1]:
-        surf = vsp.GetXSecSurf(wing_id, i)
-        vsp.ChangeXSecShape(surf, 0, vsp.XS_FILE_AIRFOIL)
-        xsec = vsp.GetXSec(surf, 0)
-        vsp.ReadFileAirfoil(xsec, airfoil_file)
+        vsp.ChangeXSecShape(surf, i, vsp.XS_FILE_AIRFOIL)
+        vsp.ReadFileAirfoil(vsp.GetXSec(surf, i), airfoil_file)
 
     vsp.SetSetFlag(wing_id, 1, True)
     vsp.Update()
@@ -159,10 +158,10 @@ def generate_wing_and_tail(plane_name, htail_b, htail_alpha, vtail_height):
     vsp.SetParmVal(wid, "SectTess_U", "XSec_1", float(wing_span_res))
     vsp.SetParmVal(wid, "Tess_W", "Shape", float(wing_chord_res))
     
+    surf = vsp.GetXSecSurf(wid, 0)
     for i in [0, 1]:
-        surf = vsp.GetXSecSurf(wid, i)
-        vsp.ChangeXSecShape(surf, 0, vsp.XS_FILE_AIRFOIL)
-        vsp.ReadFileAirfoil(vsp.GetXSec(surf, 0), airfoil_file)
+        vsp.ChangeXSecShape(surf, i, vsp.XS_FILE_AIRFOIL)
+        vsp.ReadFileAirfoil(vsp.GetXSec(surf, i), airfoil_file)
     vsp.SetSetFlag(wid, 1, True)
 
     # Horizontal Tail
