@@ -52,7 +52,7 @@ def main():
     print(f"Pitching Moment Coefficient (Cmy) at alpha={alpha} deg: {plain_moment:.6f} (without a tail)")
 
     # Generate initial tail geometry
-    S_tail = (htail_params["V_H"] * wing_params["span"]**2 * wing_params["root_chord"]) / htail_params["l_H"]
+    S_tail = (htail_params["V_H"] * wing_params["span"] * wing_params["root_chord"])**2 / htail_params["l_H"]
     b_tail = math.sqrt(S_tail * htail_params["aspect_ratio"])
     vtail_height = math.sqrt((vtail_params["V_V"] * wing_params["span"]**2 * wing_params["root_chord"]) / htail_params["l_H"])
 
