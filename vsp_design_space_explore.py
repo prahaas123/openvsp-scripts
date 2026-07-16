@@ -31,7 +31,7 @@ num_mc_samples = 500
 
 def main():
     total_sims = num_mc_samples
-    print(f"--- STARTING MONTE CARLO SWEEP ---")
+    print(f"Starting Monte Carlo Analysis")
     print(f"Total Designs to Simulate: {total_sims}")
     print(f"Estimated Time (@4.5s/sim): {total_sims * 4.5 / 60:.1f} minutes")
     
@@ -76,7 +76,7 @@ def main():
 
     df = pd.DataFrame(results)
     df.to_csv("sweep_results.csv", index=False)
-    print("--- SWEEP COMPLETE. Saved to sweep_results.csv ---")
+    print("Sweep complete. Saved to sweep_results.csv")
     
     return df
 
