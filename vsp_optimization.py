@@ -39,6 +39,7 @@ def total_weight(span, s_ref):
 # Constraint Targets
 STATIC_MARGIN = 0.05
 CM_TOL = 0.02
+CMA_MAX = -0.05
 AR_MIN = 2.0
 AR_MAX = 6.0
 TIP_CHORD_MIN = 0.05
@@ -68,7 +69,7 @@ LOG_FIELDS = [
     "root_chord", "taper", "sweep", "washout", "span", "dihedral", "alpha",
     "AR", "mass_kg", "weight", "lift", "lift_margin",
     "CL", "CD", "LD", "drag_N",
-    "CM_cg", "x_cg", "SM",
+    "CM_cg", "CM_alpha_cg", "x_cg", "SM",
 ]
 
 def init_log():
@@ -394,6 +395,7 @@ def evaluate_aero_objective(x):
         # Moment about the CG at the design alpha (shift theorem, no extra run).
         cm_cg = cm_0 + cl_0 * x_cg / mac
         sm_actual = (x_np - x_cg) / mac
+        cm_alpha_cg = cm_alpha + cl_alpha * x_cg / mac
  
         # Forces
         lift = Q_INF * s_ref * cl_0
@@ -403,7 +405,8 @@ def evaluate_aero_objective(x):
         # Penalties
         pen_lift = _quad_pen(weight - lift, weight)
         pen_trim = _quad_pen(abs(cm_cg) - CM_TOL, max(CM_TOL, 1e-3))
-        penalty = pen_lift + pen_trim
+        pen_cma = _quad_pen(cm_alpha_cg - CMA_MAX, max(abs(CMA_MAX), 1e-3))
+        penalty = pen_lift + pen_trim + pen_cma
         feasible = penalty <= 0.0
         objective = drag + penalty
         
@@ -419,13 +422,14 @@ def evaluate_aero_objective(x):
                 "lift": round(lift, 6), "lift_margin": round(lift - weight, 6),
                 "CL": round(cl_0, 6), "CD": round(cd_0, 6),
                 "LD": round(ld, 6), "drag_N": round(drag, 6),
-                "CM_cg": round(cm_cg, 6),
+                "CM_cg": round(cm_cg, 6), "CM_alpha_cg": round(cm_alpha_cg, 6),
                 "x_cg": round(x_cg, 6), "SM": round(sm_actual, 6),
             })
  
         tag = "FEASIBLE" if feasible else "infeasible"
         print(f"  [{run_id}] {tag:10s} D={drag:.4f} N  obj={objective:.4f}  "
               f"L/D={ld:.2f}  L-W={lift - weight:+.3f} N  CMcg={cm_cg:+.4f}  "
+              f"CMa={cm_alpha_cg:+.4f}  "
               f"m={weight/9.81:.3f} kg  AR={ar:.2f}")
  
         return float(objective)
@@ -513,7 +517,7 @@ def main():
     print(f"{'x_cg':12s}: {float(row['x_cg']):.4f} m  (SM = {float(row['SM_actual']) * 100:.2f}% MAC)")
  
     print("\n--- AERODYNAMICS ---")
-    for k in ["CL", "CD", "CD0", "LD", "drag_N", "CM_cg"]:
+    for k in ["CL", "CD", "LD", "drag_N", "CM_cg", "CM_alpha_cg"]:
         print(f"{k:12s}: {float(row[k]):.5f}")
  
     print("\n--- WEIGHT ---")
