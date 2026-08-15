@@ -1,19 +1,21 @@
 import os
-import pyvista as pv
 import csv
 import glob
 import numpy as np
 import openvsp as vsp # type: ignore
 import shutil
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.io as pio
+from plotly.subplots import make_subplots
 
 wing_span_res = 10
 wing_chord_res = 25
 velocities = list(range(10, 50, 5)) # m/s
 alphas = list(range(-5, 15)) # degrees AoA
+
 stability_velocity = 20.0 # m/s
-
 airfoil_file = r"Airfoils\goe322.dat"
-
 x_cg = 0.065
 
 wing_params = {
@@ -61,12 +63,14 @@ def main():
         print(f"\n=== Running VSP Aero Sweep at {v} m/s ===")
         vsp3_path = shutil.copy(PLANE, "plane.vsp3")
         CL, CD, CDi, Cm = vsp_sweep(vsp3_path, v, Sref, bref, cref)
-        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm", "Oswald_efficiency"]
+        aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm", "Lift", "Drag", "Oswald_efficiency"]
 
         aero_results = []
         for i, alpha in enumerate(alphas):
             e = compute_oswald(CL[i], CDi[i], Sref, bref)
-            row = [v, alpha, CL[i], CD[i], Cm[i], e]
+            lift = 0.5 * 1.225 * (v ** 2) * Sref * CL[i]
+            drag = 0.5 * 1.225 * (v ** 2) * Sref * CD[i]
+            row = [v, alpha, CL[i], CD[i], Cm[i], lift, drag, e]
             aero_results.append(row)
 
         # Write to CSV
@@ -112,6 +116,12 @@ def main():
             os.remove(filename)
         except OSError:
             pass
+
+    # Launch dashboard
+    try:
+        plot_dashboard("aero_full.csv", "stability.csv")
+    except Exception as exc:
+        print(f"[dashboard] skipped: {exc}")
 
 def generate_wing_and_tail(plane_name):
     airfoil_fwd  = airfoil_file.replace("\\", "/")
@@ -312,8 +322,15 @@ def read_stability(stab_path):
                 pass
         return float('nan')
  
+    cm_alpha = get('CMm', col_alpha)           # CMm wrt Alpha
+    cl_alpha = get('CL',  col_alpha)           # CL  wrt Alpha
+    with np.errstate(divide='ignore', invalid='ignore'):
+        sm = float(-cm_alpha / cl_alpha) if (np.isfinite(cl_alpha) and cl_alpha != 0.0) else float('nan')
+
     vsp_dict = {
-        'Cm_alpha': get('CMm', col_alpha),     # CMm wrt Alpha (longitudinal static stability)
+        'Cm_alpha': cm_alpha,                  # CMm wrt Alpha (longitudinal static stability)
+        'CL_alpha': cl_alpha,                  # CL  wrt Alpha
+        'Static_Margin': sm,                   # -Cm_alpha / CL_alpha  (>0 = statically stable)
         'CL_de':   get('CL',  col_elevator),   # CL  wrt elevator
         'CY_beta': get('CS',  col_beta),       # CS  wrt Beta
         'CY_p':    get('CS',  col_p),          # CS  wrt p
@@ -375,6 +392,167 @@ def compute_oswald(cl, cdi, s, b):
     if e.ndim == 0:
         return float(e)
     return e
+
+def plot_dashboard(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
+    pio.renderers.default = "browser"
+
+    df = pd.read_csv(sweep_csv)
+    df["L_D"] = df["CL"] / df["CD"]
+    stab = pd.read_csv(stab_csv).iloc[0].to_dict()
+
+    velocities_sorted = sorted(df["Velocity"].unique())
+    scale = pio.templates
+    n = max(len(velocities_sorted) - 1, 1)
+    vel_colors = {
+        v: pv_color for v, pv_color in zip(
+            velocities_sorted,
+            [f"hsl({int(210 + 130 * i / n)},70%,60%)" for i in range(len(velocities_sorted))]
+        )
+    }
+
+    specs = [
+        [{"type": "xy"}, {"type": "xy"}, {"type": "xy"}, {"type": "xy"}],   # aero 1-4
+        [{"type": "xy"}, {"type": "xy"}, {"type": "xy"}, {"type": "xy"}],   # aero 5-8
+        [{"type": "xy", "colspan": 4}, None, None, None],                   # stability cards
+        [{"type": "table", "colspan": 4}, None, None, None],                # values table
+    ]
+    titles = [
+        "CL vs \u03b1", "CD vs \u03b1", "Cm vs \u03b1", "Drag polar (CL vs CD)",
+        "L/D vs \u03b1", "Lift vs \u03b1 (N)", "Drag vs \u03b1 (N)", "Oswald e vs \u03b1",
+        "Cruise stability check (\u03b1 = 0\u00b0)",
+        "Stability derivatives",
+    ]
+    fig = make_subplots(
+        rows=4, cols=4, specs=specs, subplot_titles=titles,
+        row_heights=[0.20, 0.20, 0.24, 0.36],
+        vertical_spacing=0.06, horizontal_spacing=0.06,
+    )
+
+    # Aero graphs
+    def add_curves(xcol, ycol, row, col, show_legend):
+        for v in velocities_sorted:
+            sub = df[df["Velocity"] == v].sort_values("Alpha_deg")
+            fig.add_trace(go.Scatter(
+                x=sub[xcol], y=sub[ycol], mode="lines+markers",
+                name=f"{v:.0f} m/s", legendgroup=f"{v}", showlegend=show_legend,
+                line=dict(color=vel_colors[v], width=2), marker=dict(size=4),
+            ), row=row, col=col)
+
+    add_curves("Alpha_deg", "CL", 1, 1, True)
+    add_curves("Alpha_deg", "CD", 1, 2, False)
+    add_curves("Alpha_deg", "Cm", 1, 3, False)
+    add_curves("CD", "CL", 1, 4, False)          # drag polar
+    add_curves("Alpha_deg", "L_D", 2, 1, False)
+    add_curves("Alpha_deg", "Lift", 2, 2, False)
+    add_curves("Alpha_deg", "Drag", 2, 3, False)
+    add_curves("Alpha_deg", "Oswald_efficiency", 2, 4, False)
+
+    _amin, _amax = df["Alpha_deg"].min(), df["Alpha_deg"].max()
+    fig.add_trace(go.Scatter(
+        x=[_amin, _amax], y=[0, 0], mode="lines", hoverinfo="skip", showlegend=False,
+        line=dict(color="#888", dash="dot", width=1),
+    ), row=1, col=3)
+
+    # axis labels
+    fig.update_xaxes(title_text="\u03b1 (deg)", row=1, col=1); fig.update_yaxes(title_text="CL", row=1, col=1)
+    fig.update_xaxes(title_text="\u03b1 (deg)", row=1, col=2); fig.update_yaxes(title_text="CD", row=1, col=2)
+    fig.update_xaxes(title_text="\u03b1 (deg)", row=1, col=3); fig.update_yaxes(title_text="Cm", row=1, col=3)
+    fig.update_xaxes(title_text="CD", row=1, col=4);         fig.update_yaxes(title_text="CL", row=1, col=4)
+    fig.update_xaxes(title_text="\u03b1 (deg)", row=2, col=1); fig.update_yaxes(title_text="L/D", row=2, col=1)
+    fig.update_xaxes(title_text="\u03b1 (deg)", row=2, col=2); fig.update_yaxes(title_text="Lift (N)", row=2, col=2)
+    fig.update_xaxes(title_text="\u03b1 (deg)", row=2, col=3); fig.update_yaxes(title_text="Drag (N)", row=2, col=3)
+    fig.update_xaxes(title_text="\u03b1 (deg)", row=2, col=4); fig.update_yaxes(title_text="e", row=2, col=4)
+
+    # Stability scores
+    GREEN, RED, GREY = "#2ECC71", "#E74C3C", "#7F8C8D"
+    GREEN_BG, RED_BG, GREY_BG = "rgba(46,204,113,0.10)", "rgba(231,76,60,0.10)", "rgba(127,140,141,0.08)"
+    cards = [
+        ("Cm_alpha",      "Cm_\u03b1",        "target < 0",      lambda x: x < 0),
+        ("Static_Margin", "Static Margin",    "target 0.05\u20130.15", lambda x: x > 0),
+        ("Cn_beta",       "Cn_\u03b2",        "target > 0",      lambda x: x > 0),
+        ("Cl_beta",       "Cl_\u03b2",        "target < 0",      lambda x: x < 0),
+        ("Cm_q",          "Cm_q",             "target < 0",      lambda x: x < 0),
+        ("Cl_p",          "Cl_p",             "target < 0",      lambda x: x < 0),
+        ("Cn_r",          "Cn_r",             "target < 0",      lambda x: x < 0),
+        ("CY_beta",       "CY_\u03b2",        "target < 0",      lambda x: x < 0),
+    ]
+
+    fig.add_trace(go.Scatter(x=[0, 4], y=[0, 2], mode="markers", marker=dict(opacity=0), hoverinfo="skip", showlegend=False), row=3, col=1)
+    fig.update_xaxes(visible=False, range=[0, 4], row=3, col=1)
+    fig.update_yaxes(visible=False, range=[0, 2], row=3, col=1)
+    for idx, (key, label, target, test) in enumerate(cards):
+        cx = idx % 4
+        top_band = 2 - (idx // 4)
+        x0, x1 = cx + 0.04, cx + 0.96
+        y0, y1 = (top_band - 1) + 0.10, top_band - 0.10
+        xc = (x0 + x1) / 2.0
+        val = float(stab.get(key, float("nan")))
+        if not np.isfinite(val):
+            edge, fillc, valtxt = GREY, GREY_BG, "N/A"
+        else:
+            ok = test(val)
+            edge, fillc = (GREEN, GREEN_BG) if ok else (RED, RED_BG)
+            valtxt = f"{val:.3f}"
+        fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1, line=dict(color=edge, width=2), fillcolor=fillc, layer="below", row=3, col=1)
+        fig.add_annotation(x=xc, y=y1 - 0.16, text=label, showarrow=False, font=dict(size=15, color="#CCC"), row=3, col=1)
+        fig.add_annotation(x=xc, y=(y0 + y1) / 2.0 - 0.02, text=valtxt, showarrow=False, font=dict(size=26, color=edge), row=3, col=1)
+        fig.add_annotation(x=xc, y=y0 + 0.14, text=target, showarrow=False, font=dict(size=11, color="#888"), row=3, col=1)
+
+    # Values table
+    ref = {
+        "Cm_alpha":      ("< 0",            lambda x: x < 0),
+        "CL_alpha":      ("> 0 (~4\u20136 /rad)", lambda x: x > 0),
+        "Static_Margin": ("0.05 \u2013 0.15", lambda x: x > 0),
+        "CY_beta":       ("< 0",            lambda x: x < 0),
+        "CY_p":          ("\u2248 0 (small)", None),
+        "CY_r":          ("> 0",            lambda x: x > 0),
+        "Cl_beta":       ("< 0 (mild)",     lambda x: x < 0),
+        "Cl_p":          ("< 0",            lambda x: x < 0),
+        "Cl_r":          ("> 0",            lambda x: x > 0),
+        "Cm_q":          ("< 0 (strong)",   lambda x: x < 0),
+        "Cn_beta":       ("> 0",            lambda x: x > 0),
+        "Cn_p":          ("\u2248 0 (small)", None),
+        "Cn_r":          ("< 0",            lambda x: x < 0),
+        "CL_de":         ("\u2014",         None),
+        "Cm_de":         ("\u2014",         None),
+        "Cl_da":         ("\u2014",         None),
+        "Cn_da":         ("\u2014",         None),
+    }
+    order = ["Cm_alpha", "CL_alpha", "Static_Margin", "CY_beta", "CY_p", "CY_r",
+             "Cl_beta", "Cl_p", "Cl_r", "Cm_q", "Cn_beta", "Cn_p", "Cn_r",
+             "CL_de", "Cm_de", "Cl_da", "Cn_da"]
+    NEUTRAL, PASS_BG, FAIL_BG, NA_BG = "#242424", "#183a28", "#3a1e1e", "#333"
+    names, vals, recs, valcol = [], [], [], []
+    for key in order:
+        v = float(stab.get(key, float("nan")))
+        rec_text, test = ref.get(key, ("", None))
+        names.append(key)
+        recs.append(rec_text)
+        if not np.isfinite(v):
+            vals.append("N/A"); valcol.append(NA_BG)
+        else:
+            vals.append(f"{v:.4f}")
+            valcol.append(NEUTRAL if test is None else (PASS_BG if test(v) else FAIL_BG))
+    colcol = [NEUTRAL] * len(order)
+    fig.add_trace(go.Table(
+        columnwidth=[1.0, 1.0, 1.4],
+        header=dict(values=["Derivative", "Value", "Recommended"], fill_color="#444", font=dict(color="white", size=13), align="left"),
+        cells=dict(values=[names, vals, recs], fill_color=[colcol, valcol, colcol], font=dict(color="#EEE", size=12), align="left", height=24),
+    ), row=4, col=1)
+
+    v_cruise = stab.get("Velocity", "?")
+    fig.update_layout(
+        template="plotly_dark",
+        title=dict(text=f"Aero Sweep & Stability "
+                        f"(V = {v_cruise} m/s, \u03b1 = 0\u00b0)",
+                   x=0.5, font=dict(size=22)),
+        height=1900, width=1500,
+        paper_bgcolor="#111", plot_bgcolor="#1b1b1b",
+        legend=dict(title="Velocity", orientation="v", x=1.01, y=1.0),
+        margin=dict(l=60, r=60, t=90, b=40),
+    )
+    fig.show()
+    return fig
 
 if __name__ == "__main__":
     main()
