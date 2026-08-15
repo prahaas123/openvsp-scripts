@@ -10,6 +10,7 @@ wing_span_res = 10
 wing_chord_res = 25
 velocities = list(range(10, 50, 5)) # m/s
 alphas = list(range(-5, 15)) # degrees AoA
+stability_velocity = 20.0 # m/s
 
 airfoil_file = r"Airfoils\goe322.dat"
 
@@ -84,30 +85,27 @@ def main():
             except OSError:
                 pass
 
-    # Stability sweep
-    stab_csv_exists = False
-    
-    for v in velocities:
-        vsp3_path = shutil.copy(PLANE, "plane.vsp3")
-        vsp_stability(vsp3_path, v, Sref, bref, cref)
-        stab_dict = read_stability("plane.stab")
-        
-        stability_filename = "stability.csv"
-        stab_headers = ["Velocity"] + list(stab_dict.keys())
-        stab_columns = [v] + list(stab_dict.values())
-        
-        with open(stability_filename, 'a', newline='') as f:
-            writer = csv.writer(f)
-            if not stab_csv_exists:
-                writer.writerow(stab_headers)
-                stab_csv_exists = True
-            writer.writerow(stab_columns)
+    # Stability
+    v = stability_velocity
+    print(f"\n=== Running VSP Stability at {v} m/s (cruise) ===")
+    vsp3_path = shutil.copy(PLANE, "plane.vsp3")
+    vsp_stability(vsp3_path, v, Sref, bref, cref)
+    stab_dict = read_stability("plane.stab")
 
-        for filename in glob.glob("plane*"):
-            try:
-                os.remove(filename)
-            except OSError:
-                pass
+    stability_filename = "stability.csv"
+    stab_headers = ["Velocity"] + list(stab_dict.keys())
+    stab_columns = [v] + list(stab_dict.values())
+
+    with open(stability_filename, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(stab_headers)
+        writer.writerow(stab_columns)
+
+    for filename in glob.glob("plane*"):
+        try:
+            os.remove(filename)
+        except OSError:
+            pass
             
     for filename in glob.glob("Conventional*"):
         try:
@@ -220,6 +218,7 @@ def vsp_sweep(vsp3_path, velocity, Sref, bref, cref):
 
 def vsp_stability(vsp3_path, v, Sref, bref, cref):
     # Load model
+    vsp.ClearVSPModel()
     vsp.ReadVSPFile(vsp3_path)
     geom_analysis = "VSPAEROComputeGeometry"
     vsp.SetAnalysisInputDefaults(geom_analysis)   
@@ -286,7 +285,7 @@ def read_stability(stab_path):
             if not stripped or stripped.startswith('#'):
                 continue
             tokens = stripped.split()
-            if tokens[0] == 'Coef':
+            if tokens[0] == 'Coef' and col_alpha is None:
                 col_alpha    = tokens.index('Alpha')
                 col_beta     = tokens.index('Beta')
                 col_p        = tokens.index('p')
@@ -314,6 +313,7 @@ def read_stability(stab_path):
         return float('nan')
  
     vsp_dict = {
+        'Cm_alpha': get('CMm', col_alpha),     # CMm wrt Alpha (longitudinal static stability)
         'CL_de':   get('CL',  col_elevator),   # CL  wrt elevator
         'CY_beta': get('CS',  col_beta),       # CS  wrt Beta
         'CY_p':    get('CS',  col_p),          # CS  wrt p
