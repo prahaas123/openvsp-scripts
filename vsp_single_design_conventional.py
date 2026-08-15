@@ -1,4 +1,5 @@
 import os
+import pyvista as pv
 import csv
 import glob
 import numpy as np
@@ -14,7 +15,7 @@ wing_chord_res = 25
 velocities = list(range(10, 50, 5)) # m/s
 alphas = list(range(-5, 15)) # degrees AoA
 
-stability_velocity = 20.0 # m/s
+stability_velocity = 30.0 # m/s
 airfoil_file = r"Airfoils\goe322.dat"
 x_cg = 0.065
 
@@ -63,14 +64,14 @@ def main():
         print(f"\n=== Running VSP Aero Sweep at {v} m/s ===")
         vsp3_path = shutil.copy(PLANE, "plane.vsp3")
         CL, CD, CDi, Cm = vsp_sweep(vsp3_path, v, Sref, bref, cref)
+        e_fit = oswald_from_polar(CL, CD, Sref, bref)
         aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm", "Lift", "Drag", "Oswald_efficiency"]
 
         aero_results = []
         for i, alpha in enumerate(alphas):
-            e = compute_oswald(CL[i], CDi[i], Sref, bref)
             lift = 0.5 * 1.225 * (v ** 2) * Sref * CL[i]
             drag = 0.5 * 1.225 * (v ** 2) * Sref * CD[i]
-            row = [v, alpha, CL[i], CD[i], Cm[i], lift, drag, e]
+            row = [v, alpha, CL[i], CD[i], Cm[i], lift, drag, e_fit]
             aero_results.append(row)
 
         # Write to CSV
@@ -117,7 +118,7 @@ def main():
         except OSError:
             pass
 
-    # Launch dashboard
+    # Launch the dashboard
     try:
         plot_dashboard("aero_full.csv", "stability.csv")
     except Exception as exc:
@@ -382,6 +383,18 @@ def read_lift_distribution(filepath, target_vortex_sheet=1):
                         
     return data_by_aoa
 
+def oswald_from_polar(CL, CD, Sref, bref):
+    AR = bref ** 2 / Sref
+    CL = np.asarray(CL, dtype=float)
+    CD = np.asarray(CD, dtype=float)
+    mask = np.isfinite(CL) & np.isfinite(CD)
+    if mask.sum() < 2:
+        return float("nan")
+    k, _cd0 = np.polyfit(CL[mask] ** 2, CD[mask], 1)  # slope k = 1/(pi*AR*e)
+    if not np.isfinite(k) or k <= 1e-9:  # near-zero slope => degenerate/flat polar
+        return float("nan")
+    return float(1.0 / (np.pi * AR * k))
+
 def compute_oswald(cl, cdi, s, b):
     AR = (b ** 2) / s
     cl_array = np.array(cl, dtype=float)
@@ -418,7 +431,7 @@ def plot_dashboard(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     ]
     titles = [
         "CL vs \u03b1", "CD vs \u03b1", "Cm vs \u03b1", "Drag polar (CL vs CD)",
-        "L/D vs \u03b1", "Lift vs \u03b1 (N)", "Drag vs \u03b1 (N)", "Oswald e vs \u03b1",
+        "L/D vs \u03b1", "Lift vs \u03b1 (N)", "Drag vs \u03b1 (N)", "Oswald e vs velocity",
         "Cruise stability check (\u03b1 = 0\u00b0)",
         "Stability derivatives",
     ]
@@ -445,7 +458,12 @@ def plot_dashboard(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     add_curves("Alpha_deg", "L_D", 2, 1, False)
     add_curves("Alpha_deg", "Lift", 2, 2, False)
     add_curves("Alpha_deg", "Drag", 2, 3, False)
-    add_curves("Alpha_deg", "Oswald_efficiency", 2, 4, False)
+    e_by_v = df.groupby("Velocity")["Oswald_efficiency"].first().sort_index()
+    fig.add_trace(go.Scatter(
+        x=e_by_v.index, y=e_by_v.values, mode="lines+markers",
+        line=dict(color="#F1C40F", width=2), marker=dict(size=6), showlegend=False,
+        hovertemplate="V=%{x} m/s<br>e=%{y:.3f}<extra></extra>",
+    ), row=2, col=4)
 
     _amin, _amax = df["Alpha_deg"].min(), df["Alpha_deg"].max()
     fig.add_trace(go.Scatter(
@@ -461,9 +479,9 @@ def plot_dashboard(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     fig.update_xaxes(title_text="\u03b1 (deg)", row=2, col=1); fig.update_yaxes(title_text="L/D", row=2, col=1)
     fig.update_xaxes(title_text="\u03b1 (deg)", row=2, col=2); fig.update_yaxes(title_text="Lift (N)", row=2, col=2)
     fig.update_xaxes(title_text="\u03b1 (deg)", row=2, col=3); fig.update_yaxes(title_text="Drag (N)", row=2, col=3)
-    fig.update_xaxes(title_text="\u03b1 (deg)", row=2, col=4); fig.update_yaxes(title_text="e", row=2, col=4)
+    fig.update_xaxes(title_text="V (m/s)", row=2, col=4); fig.update_yaxes(title_text="e", row=2, col=4)
 
-    # Stability scores
+    # Stability scorecards
     GREEN, RED, GREY = "#2ECC71", "#E74C3C", "#7F8C8D"
     GREEN_BG, RED_BG, GREY_BG = "rgba(46,204,113,0.10)", "rgba(231,76,60,0.10)", "rgba(127,140,141,0.08)"
     cards = [
@@ -476,13 +494,14 @@ def plot_dashboard(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
         ("Cn_r",          "Cn_r",             "target < 0",      lambda x: x < 0),
         ("CY_beta",       "CY_\u03b2",        "target < 0",      lambda x: x < 0),
     ]
-
-    fig.add_trace(go.Scatter(x=[0, 4], y=[0, 2], mode="markers", marker=dict(opacity=0), hoverinfo="skip", showlegend=False), row=3, col=1)
+    fig.add_trace(go.Scatter(x=[0, 4], y=[0, 2], mode="markers",
+                             marker=dict(opacity=0), hoverinfo="skip", showlegend=False),
+                  row=3, col=1)
     fig.update_xaxes(visible=False, range=[0, 4], row=3, col=1)
     fig.update_yaxes(visible=False, range=[0, 2], row=3, col=1)
     for idx, (key, label, target, test) in enumerate(cards):
         cx = idx % 4
-        top_band = 2 - (idx // 4)
+        top_band = 2 - (idx // 4)            # top row -> 2, bottom row -> 1
         x0, x1 = cx + 0.04, cx + 0.96
         y0, y1 = (top_band - 1) + 0.10, top_band - 0.10
         xc = (x0 + x1) / 2.0
@@ -493,10 +512,15 @@ def plot_dashboard(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
             ok = test(val)
             edge, fillc = (GREEN, GREEN_BG) if ok else (RED, RED_BG)
             valtxt = f"{val:.3f}"
-        fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1, line=dict(color=edge, width=2), fillcolor=fillc, layer="below", row=3, col=1)
-        fig.add_annotation(x=xc, y=y1 - 0.16, text=label, showarrow=False, font=dict(size=15, color="#CCC"), row=3, col=1)
-        fig.add_annotation(x=xc, y=(y0 + y1) / 2.0 - 0.02, text=valtxt, showarrow=False, font=dict(size=26, color=edge), row=3, col=1)
-        fig.add_annotation(x=xc, y=y0 + 0.14, text=target, showarrow=False, font=dict(size=11, color="#888"), row=3, col=1)
+        fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1,
+                      line=dict(color=edge, width=2), fillcolor=fillc, layer="below",
+                      row=3, col=1)
+        fig.add_annotation(x=xc, y=y1 - 0.16, text=label, showarrow=False,
+                           font=dict(size=15, color="#CCC"), row=3, col=1)
+        fig.add_annotation(x=xc, y=(y0 + y1) / 2.0 - 0.02, text=valtxt, showarrow=False,
+                           font=dict(size=26, color=edge), row=3, col=1)
+        fig.add_annotation(x=xc, y=y0 + 0.14, text=target, showarrow=False,
+                           font=dict(size=11, color="#888"), row=3, col=1)
 
     # Values table
     ref = {
@@ -536,15 +560,18 @@ def plot_dashboard(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     colcol = [NEUTRAL] * len(order)
     fig.add_trace(go.Table(
         columnwidth=[1.0, 1.0, 1.4],
-        header=dict(values=["Derivative", "Value", "Recommended"], fill_color="#444", font=dict(color="white", size=13), align="left"),
-        cells=dict(values=[names, vals, recs], fill_color=[colcol, valcol, colcol], font=dict(color="#EEE", size=12), align="left", height=24),
+        header=dict(values=["Derivative", "Value", "Recommended"],
+                    fill_color="#444", font=dict(color="white", size=13), align="left"),
+        cells=dict(values=[names, vals, recs],
+                   fill_color=[colcol, valcol, colcol],
+                   font=dict(color="#EEE", size=12), align="left", height=24),
     ), row=4, col=1)
 
     v_cruise = stab.get("Velocity", "?")
     fig.update_layout(
         template="plotly_dark",
-        title=dict(text=f"Aero Sweep & Stability "
-                        f"(V = {v_cruise} m/s, \u03b1 = 0\u00b0)",
+        title=dict(text=f"Conventional UAV \u2014 Aero Sweep & Cruise Stability "
+                        f"(stability @ {v_cruise} m/s, \u03b1 = 0\u00b0)",
                    x=0.5, font=dict(size=22)),
         height=1900, width=1500,
         paper_bgcolor="#111", plot_bgcolor="#1b1b1b",
