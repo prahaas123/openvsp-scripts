@@ -22,8 +22,8 @@ BOUNDS = [
     (0.15, 0.40),    # root_chord [m]
     (0.25, 1.00),    # taper ratio
     (0.0, 45.0),     # LE sweep [deg]
-    (-4.0, 0.0),     # washout [deg]
-    (0.50, 1.10),    # full span [m]
+    (-5.0, 0.0),     # washout [deg]
+    (0.50, 0.60),    # full span [m]
     (0.0, 5.0),      # dihedral [deg]
     (2.0, 8.0),      # alpha [deg]
 ]
@@ -67,9 +67,9 @@ LOG_CSV = "optimization_results.csv"
 LOG_FIELDS = [
     "run_id", "objective",
     "root_chord", "taper", "sweep", "washout", "span", "dihedral", "alpha",
-    "AR", "mass_kg", "weight", "lift", "lift_margin",
+    "AR", "S_ref", "MAC", "tip_chord", "mass_kg", "weight", "lift", "lift_margin",
     "CL", "CD", "LD", "drag_N",
-    "CM_cg", "CM_alpha_cg", "x_cg", "SM",
+    "CM_cg", "CM_alpha_cg", "x_np", "x_cg", "SM_actual",
 ]
 
 def init_log():
@@ -413,17 +413,20 @@ def evaluate_aero_objective(x):
         if feasible:
             append_log({
                 "run_id": run_id,
-                "objective": round(objective, 6), "taper": round(taper, 6),
+                "objective": round(objective, 6), "root_chord": round(root_chord, 6),
+                "taper": round(taper, 6),
                 "sweep": round(sweep, 6), "washout": round(washout, 6),
                 "span": round(span, 6), "dihedral": round(dihedral, 6),
                 "alpha": round(alpha, 6), "AR": round(ar, 6),
+                "S_ref": round(s_ref, 6), "MAC": round(mac, 6),
                 "tip_chord": round(g["tip_chord"], 6),
                 "weight": round(weight, 6), "mass_kg": round(weight/9.81, 6),
                 "lift": round(lift, 6), "lift_margin": round(lift - weight, 6),
                 "CL": round(cl_0, 6), "CD": round(cd_0, 6),
                 "LD": round(ld, 6), "drag_N": round(drag, 6),
                 "CM_cg": round(cm_cg, 6), "CM_alpha_cg": round(cm_alpha_cg, 6),
-                "x_cg": round(x_cg, 6), "SM": round(sm_actual, 6),
+                "x_np": round(x_np, 6), "x_cg": round(x_cg, 6),
+                "SM_actual": round(sm_actual, 6),
             })
  
         tag = "FEASIBLE" if feasible else "infeasible"
