@@ -21,13 +21,13 @@ airfoil_file = os.path.join("Airfoils", "mh61.dat")
 
 # Design variables
 wing_params = {
-    "root_chord": 0.2593,  # m
-    "taper": 0.40,
-    "sweep": 45.0,         # deg
-    "washout": -3.0,       # deg
-    "span": 0.70,          # m
-    "dihedral": 0.0,       # deg
-    "alpha": 3.0,          # deg, design cruise AoA
+    "root_chord": 0.22,  # m
+    "taper": 0.4,
+    "sweep": 25.0,         # deg
+    "washout": -2,       # deg
+    "span": 0.60,          # m
+    "dihedral": 2.5,       # deg
+    "alpha": 5,          # deg, design cruise AoA
 }
 
 
@@ -127,6 +127,7 @@ def generate_delta_wing(plane_name):
     vsp.SetParmVal(wid, "Sweep",          "XSec_1",   wing_params["sweep"])
     vsp.SetParmVal(wid, "Dihedral",       "XSec_1",   wing_params["dihedral"])
     vsp.SetParmVal(wid, "Twist",          "XSec_1",   wing_params["washout"])
+    vsp.SetParmVal(wid, "Y_Rel_Rotation", "XForm",    wing_params["alpha"])
     vsp.SetParmVal(wid, "Twist_Location", "XSec_1",   1.0)   # washout applied at the tip
     vsp.SetParmVal(wid, "SectTess_U",     "XSec_1",   float(wing_span_res))
     vsp.SetParmVal(wid, "Tess_W",         "Shape",    float(wing_chord_res))
