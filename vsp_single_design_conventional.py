@@ -45,6 +45,21 @@ vtail_params = {
     "sweep": 15.0
 }
 
+# Stability targets
+stability_targets = {
+    "Cm_alpha":      {"good": -0.4},
+    "CL_alpha":      {"good": 4.0},
+    "Static_Margin": {"good": 0.08,  "limit": 0.15},
+    "CY_beta":       {"good": -0.2},
+    "CY_r":          {"good": 0.1},
+    "Cl_beta":       {"good": -0.05, "limit": -0.20},  # too much -> Dutch roll
+    "Cl_p":          {"good": -0.35},
+    "Cl_r":          {"good": 0.05},
+    "Cm_q":          {"good": -8.0},
+    "Cn_beta":       {"good": 0.06,  "limit": 0.20},   # too much -> spiral divergence
+    "Cn_r":          {"good": -0.1},
+}
+
 def main():
     bref = wing_params["span"]
     cref = wing_params["root_chord"]
@@ -406,6 +421,27 @@ def compute_oswald(cl, cdi, s, b):
         return float(e)
     return e
 
+def grade_stability(key, val):
+    t = stability_targets.get(key)
+    if t is None or not np.isfinite(val):
+        return None
+    good, limit = t["good"], t.get("limit")
+    if val * np.sign(good) <= 0:
+        return "fail"
+    if abs(val) < abs(good) or (limit is not None and abs(val) > abs(limit)):
+        return "warn"
+    return "pass"
+
+def target_text(key):
+    t = stability_targets.get(key)
+    if t is None:
+        return "—"
+    good, limit = t["good"], t.get("limit")
+    if limit is not None:
+        lo, hi = sorted((good, limit))
+        return f"{lo:g} to {hi:g}"
+    return f"≥ {good:g}" if good > 0 else f"≤ {good:g}"
+
 def plot_dashboard(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     pio.renderers.default = "browser"
 
@@ -482,36 +518,36 @@ def plot_dashboard(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     fig.update_xaxes(title_text="V (m/s)", row=2, col=4); fig.update_yaxes(title_text="e", row=2, col=4)
 
     # Stability scorecards
-    GREEN, RED, GREY = "#2ECC71", "#E74C3C", "#7F8C8D"
-    GREEN_BG, RED_BG, GREY_BG = "rgba(46,204,113,0.10)", "rgba(231,76,60,0.10)", "rgba(127,140,141,0.08)"
+    card_style = {
+        "pass": ("#2ECC71", "rgba(46,204,113,0.10)"),
+        "warn": ("#F1C40F", "rgba(241,196,15,0.10)"),
+        "fail": ("#E74C3C", "rgba(231,76,60,0.10)"),
+        None:   ("#7F8C8D", "rgba(127,140,141,0.08)"),
+    }
     cards = [
-        ("Cm_alpha",      "Cm_\u03b1",        "target < 0",      lambda x: x < 0),
-        ("Static_Margin", "Static Margin",    "target 0.05\u20130.15", lambda x: x > 0),
-        ("Cn_beta",       "Cn_\u03b2",        "target > 0",      lambda x: x > 0),
-        ("Cl_beta",       "Cl_\u03b2",        "target < 0",      lambda x: x < 0),
-        ("Cm_q",          "Cm_q",             "target < 0",      lambda x: x < 0),
-        ("Cl_p",          "Cl_p",             "target < 0",      lambda x: x < 0),
-        ("Cn_r",          "Cn_r",             "target < 0",      lambda x: x < 0),
-        ("CY_beta",       "CY_\u03b2",        "target < 0",      lambda x: x < 0),
+        ("Cm_alpha",      "Cm_\u03b1"),
+        ("Static_Margin", "Static Margin"),
+        ("Cn_beta",       "Cn_\u03b2"),
+        ("Cl_beta",       "Cl_\u03b2"),
+        ("Cm_q",          "Cm_q"),
+        ("Cl_p",          "Cl_p"),
+        ("Cn_r",          "Cn_r"),
+        ("CY_beta",       "CY_\u03b2"),
     ]
     fig.add_trace(go.Scatter(x=[0, 4], y=[0, 2], mode="markers",
                              marker=dict(opacity=0), hoverinfo="skip", showlegend=False),
                   row=3, col=1)
     fig.update_xaxes(visible=False, range=[0, 4], row=3, col=1)
     fig.update_yaxes(visible=False, range=[0, 2], row=3, col=1)
-    for idx, (key, label, target, test) in enumerate(cards):
+    for idx, (key, label) in enumerate(cards):
         cx = idx % 4
         top_band = 2 - (idx // 4)            # top row -> 2, bottom row -> 1
         x0, x1 = cx + 0.04, cx + 0.96
         y0, y1 = (top_band - 1) + 0.10, top_band - 0.10
         xc = (x0 + x1) / 2.0
         val = float(stab.get(key, float("nan")))
-        if not np.isfinite(val):
-            edge, fillc, valtxt = GREY, GREY_BG, "N/A"
-        else:
-            ok = test(val)
-            edge, fillc = (GREEN, GREEN_BG) if ok else (RED, RED_BG)
-            valtxt = f"{val:.3f}"
+        edge, fillc = card_style[grade_stability(key, val)]
+        valtxt = f"{val:.3f}" if np.isfinite(val) else "N/A"
         fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1,
                       line=dict(color=edge, width=2), fillcolor=fillc, layer="below",
                       row=3, col=1)
@@ -519,44 +555,26 @@ def plot_dashboard(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
                            font=dict(size=15, color="#CCC"), row=3, col=1)
         fig.add_annotation(x=xc, y=(y0 + y1) / 2.0 - 0.02, text=valtxt, showarrow=False,
                            font=dict(size=26, color=edge), row=3, col=1)
-        fig.add_annotation(x=xc, y=y0 + 0.14, text=target, showarrow=False,
+        fig.add_annotation(x=xc, y=y0 + 0.14, text=f"target {target_text(key)}", showarrow=False,
                            font=dict(size=11, color="#888"), row=3, col=1)
 
     # Values table
-    ref = {
-        "Cm_alpha":      ("< 0",            lambda x: x < 0),
-        "CL_alpha":      ("> 0 (~4\u20136 /rad)", lambda x: x > 0),
-        "Static_Margin": ("0.05 \u2013 0.15", lambda x: x > 0),
-        "CY_beta":       ("< 0",            lambda x: x < 0),
-        "CY_p":          ("\u2248 0 (small)", None),
-        "CY_r":          ("> 0",            lambda x: x > 0),
-        "Cl_beta":       ("< 0 (mild)",     lambda x: x < 0),
-        "Cl_p":          ("< 0",            lambda x: x < 0),
-        "Cl_r":          ("> 0",            lambda x: x > 0),
-        "Cm_q":          ("< 0 (strong)",   lambda x: x < 0),
-        "Cn_beta":       ("> 0",            lambda x: x > 0),
-        "Cn_p":          ("\u2248 0 (small)", None),
-        "Cn_r":          ("< 0",            lambda x: x < 0),
-        "CL_de":         ("\u2014",         None),
-        "Cm_de":         ("\u2014",         None),
-        "Cl_da":         ("\u2014",         None),
-        "Cn_da":         ("\u2014",         None),
-    }
+    untargeted_text = {"CY_p": "\u2248 0 (small)", "Cn_p": "\u2248 0 (small)"}
     order = ["Cm_alpha", "CL_alpha", "Static_Margin", "CY_beta", "CY_p", "CY_r",
              "Cl_beta", "Cl_p", "Cl_r", "Cm_q", "Cn_beta", "Cn_p", "Cn_r",
              "CL_de", "Cm_de", "Cl_da", "Cn_da"]
-    NEUTRAL, PASS_BG, FAIL_BG, NA_BG = "#242424", "#183a28", "#3a1e1e", "#333"
+    NEUTRAL, NA_BG = "#242424", "#333"
+    cell_bg = {"pass": "#183a28", "warn": "#3a3418", "fail": "#3a1e1e", None: NEUTRAL}
     names, vals, recs, valcol = [], [], [], []
     for key in order:
         v = float(stab.get(key, float("nan")))
-        rec_text, test = ref.get(key, ("", None))
         names.append(key)
-        recs.append(rec_text)
+        recs.append(untargeted_text.get(key, target_text(key)))
         if not np.isfinite(v):
             vals.append("N/A"); valcol.append(NA_BG)
         else:
             vals.append(f"{v:.4f}")
-            valcol.append(NEUTRAL if test is None else (PASS_BG if test(v) else FAIL_BG))
+            valcol.append(cell_bg[grade_stability(key, v)])
     colcol = [NEUTRAL] * len(order)
     fig.add_trace(go.Table(
         columnwidth=[1.0, 1.0, 1.4],
