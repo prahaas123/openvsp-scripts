@@ -7,7 +7,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from scipy.stats import qmc
-import vsp_optimization as vo
 
 # INPUTS
 
@@ -26,6 +25,7 @@ BOUNDS = [
 ]
 
 DIHEDRAL = 2.5           # [deg] fixed dihedral value
+AIRFOIL_FILE = os.path.join("Airfoils", "mh61.dat")
 
 # Weight Estimate
 M_FIXED = 0.265          # [kg]      avionics, battery, propulsion, payload
@@ -66,6 +66,8 @@ def planform(root_chord, taper, span):
     mac = (2.0 / 3.0) * root_chord * (1.0 + taper + taper ** 2) / (1.0 + taper)
     y_mac = (span / 2.0) * (1.0 + 2.0 * taper) / (3.0 * (1.0 + taper))
     return dict(tip_chord=tip_chord, s_ref=s_ref, ar=ar, mac=mac, y_mac=y_mac)
+
+import vsp_optimization as vo  # noqa: E402
 
 def evaluate(x):
     root_chord, taper, sweep, washout, span, alpha = [float(v) for v in x]

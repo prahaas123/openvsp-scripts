@@ -11,9 +11,6 @@ import tempfile
 import contextlib
 import multiprocessing
 
-# openvsp writes a fixed %TEMP%\temp.txt on import, so parallel workers each get their own TEMP.
-# make_pool() passes workers a parent folder through the environment, which they inherit before
-# any import runs; the main process deletes it on exit (terminated workers can't clean up).
 _POOL_TMP = os.environ.pop("VSP_POOL_TMP", None)
 if _POOL_TMP:
     os.environ["TEMP"] = os.environ["TMP"] = tempfile.mkdtemp(prefix="worker_", dir=_POOL_TMP)
@@ -22,44 +19,20 @@ import numpy as np
 import openvsp as vsp  # type: ignore
 from scipy.optimize import differential_evolution, NonlinearConstraint
 
-VELOCITY = 12.0          # [m/s] cruise airspeed
-RHO = 1.225
+# INPUTS
+
+POPSIZE = 10                     # DE population = POPSIZE * number of design variables
+MAXITER = 30                     # DE generations
+N_WORKERS = os.cpu_count() or 1  # parallel VSPAERO cases
+
+from vsp_design_space_explore import (
+    VELOCITY, RHO, VAR_NAMES, BOUNDS, Q_INF, ALPHA_STEP_DEG, STATIC_MARGIN,
+    CM_TOL, AR_MIN, AR_MAX, TIP_CHORD_MIN, DIHEDRAL, AIRFOIL_FILE,
+    planform, total_weight,
+)
+
 MU = 1.81e-5
 A_SOUND = 343.0          # [m/s]
-Q_INF = 0.5 * RHO * VELOCITY ** 2
- 
-AIRFOIL_FILE = os.path.join("Airfoils", "mh61.dat")
-
-# Design Variable Bounds
-VAR_NAMES = ["root_chord", "taper", "sweep", "washout", "span", "alpha"]
-BOUNDS = [
-    (0.15, 0.40),    # root_chord [m]
-    (0.25, 1.00),    # taper ratio
-    (0.0, 45.0),     # LE sweep [deg]
-    (-5.0, 0.0),     # washout [deg]
-    (0.50, 0.60),    # full span [m]
-    (2.0, 8.0),      # alpha [deg]
-]
-
-# Fixed Inputs
-DIHEDRAL = 2.5           # [deg] set from Cl_beta / spiral targets, barely affects drag
-
-# Weight Estimate
-M_FIXED = 0.265          # [kg]      avionics, battery, propulsion, payload
-M_SPAR_PER_M = 0.044     # [kg/m]    spar mass per unit span
-M_SKIN_PER_M2 = 0.950    # [kg/m^2]  3D-printed skin + ribs per unit planform area
-
-def total_weight(span, s_ref):
-    return 9.81 * (M_FIXED + M_SPAR_PER_M * span + M_SKIN_PER_M2 * s_ref)
-
-# Constraint Targets
-STATIC_MARGIN = 0.05
-CM_TOL = 0.02
-AR_MIN = 2.0
-AR_MAX = 6.0
-TIP_CHORD_MIN = 0.05
-
-ALPHA_STEP_DEG = 1.0
 
 # Pentalty Weights
 PENALTY_WEIGHT = 20.0
@@ -79,7 +52,6 @@ WING_SPAN_RES = 10
 WING_CHORD_RES = 25
 WAKE_NUM_ITER = 5
 NCPU = 1                 # threads per VSPAERO case (meshes are too small to benefit from more)
-N_WORKERS = os.cpu_count() or 1  # parallel VSPAERO cases
 
 # Logging
 LOG_CSV = f"optimization_results_{time.strftime('%Y%m%d_%H%M%S')}.csv"
@@ -103,13 +75,11 @@ def append_log(row):
             csv.DictWriter(f, fieldnames=LOG_FIELDS, extrasaction="ignore").writerow(row)
 
 def _init_worker(lock, log_csv):
-    # Workers ignore Ctrl+C so the main process can stop the pool cleanly
     global _LOG_LOCK, LOG_CSV
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     _LOG_LOCK, LOG_CSV = lock, log_csv
 
 def make_pool():
-    # Each worker process gets its own openvsp instance; LOG_CSV is passed so all workers share one log
     pool_tmp = tempfile.mkdtemp(prefix="vsp_pool_")
     atexit.register(shutil.rmtree, pool_tmp, True)
     os.environ["VSP_POOL_TMP"] = pool_tmp
@@ -134,14 +104,6 @@ def lookup_best():
     return best
 
 # Geometric Evaluations
-def planform(root_chord, taper, span):
-    tip_chord = root_chord * taper
-    s_ref = 0.5 * (root_chord + tip_chord) * span
-    ar = span ** 2 / max(s_ref, 1e-12)
-    mac = (2.0 / 3.0) * root_chord * (1.0 + taper + taper ** 2) / (1.0 + taper)
-    y_mac = (span / 2.0) * (1.0 + 2.0 * taper) / (3.0 * (1.0 + taper))
-    return dict(tip_chord=tip_chord, s_ref=s_ref, ar=ar, mac=mac, y_mac=y_mac)
-
 def x_ac_estimate(root_chord, taper, span, sweep_deg):
     g = planform(root_chord, taper, span)
     return g["y_mac"] * math.tan(math.radians(sweep_deg)) + 0.25 * g["mac"]
@@ -206,7 +168,6 @@ def estimate_cd0(mac, s_ref, sweep_deg):
     return float(cf * ff * s_wet / max(s_ref, 1e-12))
 
 def read_lod(lod_path):
-    # Spanwise strips per alpha from a VSPAERO .lod file: {alpha: {column: array}}
     blocks, alpha, cols = {}, None, None
     with open(lod_path, "r") as f:
         for line in f:
@@ -228,7 +189,6 @@ def read_lod(lod_path):
 _KULFAN = None
 
 def strip_cd0(lod_path, s_ref):
-    # Profile drag per alpha: NeuralFoil cd(cl_local, Re_local) integrated over the VSPAERO strips
     global _KULFAN
     import neuralfoil as nf
     if _KULFAN is None:
@@ -576,8 +536,8 @@ def main():
             strategy="rand1bin",
             recombination=0.9,
             mutation=(0.5, 1.0),
-            popsize=10,
-            maxiter=30,
+            popsize=POPSIZE,
+            maxiter=MAXITER,
             tol=1e-3,
             init="latinhypercube",
             polish=False,
