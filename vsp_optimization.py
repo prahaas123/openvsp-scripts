@@ -4,10 +4,23 @@ import glob
 import uuid
 import math
 import time
+import signal
+import shutil
+import atexit
+import tempfile
+import contextlib
+import multiprocessing
+
+# openvsp writes a fixed %TEMP%\temp.txt on import, so parallel workers each get their own TEMP.
+# make_pool() flags its workers through the environment, which they inherit before any import runs.
+if os.environ.pop("VSP_POOL_WORKER", None):
+    _worker_tmp = tempfile.mkdtemp(prefix="vsp_worker_")
+    os.environ["TEMP"] = os.environ["TMP"] = _worker_tmp
+    atexit.register(shutil.rmtree, _worker_tmp, True)
+
 import numpy as np
 import openvsp as vsp  # type: ignore
 from scipy.optimize import differential_evolution, NonlinearConstraint
-import pyvista as pv  # type: ignore
 
 VELOCITY = 12.0          # [m/s] cruise airspeed
 RHO = 1.225
@@ -18,16 +31,18 @@ Q_INF = 0.5 * RHO * VELOCITY ** 2
 AIRFOIL_FILE = os.path.join("Airfoils", "mh61.dat")
 
 # Design Variable Bounds
-VAR_NAMES = ["root_chord", "taper", "sweep", "washout", "span", "dihedral", "alpha"]
+VAR_NAMES = ["root_chord", "taper", "sweep", "washout", "span", "alpha"]
 BOUNDS = [
     (0.15, 0.40),    # root_chord [m]
     (0.25, 1.00),    # taper ratio
     (0.0, 45.0),     # LE sweep [deg]
     (-5.0, 0.0),     # washout [deg]
     (0.50, 0.60),    # full span [m]
-    (0.0, 5.0),      # dihedral [deg]
     (2.0, 8.0),      # alpha [deg]
 ]
+
+# Fixed Inputs
+DIHEDRAL = 2.5           # [deg] set from Cl_beta / spiral targets, barely affects drag
 
 # Weight Estimate
 M_FIXED = 0.265          # [kg]      avionics, battery, propulsion, payload
@@ -51,6 +66,9 @@ PENALTY_WEIGHT = 20.0
 FAILED_RUN_OBJECTIVE = 1.0e6
 
 # Parasitic Drag Model
+PROFILE_DRAG_MODEL = "strip"  # "strip": NeuralFoil cd(cl, Re) on each VSPAERO strip, "flat_plate": estimate_cd0
+NF_MODEL_SIZE = "large"  # NeuralFoil network size
+N_CRIT = 9.0             # transition criterion for NeuralFoil
 LAMINAR_FRACTION = 0.40  # fraction of chord assumed laminar
 FF_MACH_MIN = 0.30       # below this Mach the compressibility form-factor term is skipped
 TC_DEFAULT = 0.10        # fallback t/c
@@ -60,25 +78,44 @@ XTC_DEFAULT = 0.30       # fallback chordwise location of max t/c
 WING_SPAN_RES = 10
 WING_CHORD_RES = 25
 WAKE_NUM_ITER = 5
-NCPU = 8
+NCPU = 1                 # threads per VSPAERO case (meshes are too small to benefit from more)
+N_WORKERS = os.cpu_count() or 1  # parallel VSPAERO cases
 
 # Logging
 LOG_CSV = f"optimization_results_{time.strftime('%Y%m%d_%H%M%S')}.csv"
 LOG_FIELDS = [
     "run_id", "objective",
-    "root_chord", "taper", "sweep", "washout", "span", "dihedral", "alpha",
+    "root_chord", "taper", "sweep", "washout", "span", "alpha",
     "AR", "S_ref", "MAC", "tip_chord", "mass_kg", "weight", "lift", "lift_margin",
     "CL", "CD", "LD", "drag_N",
     "CM_cg", "CM_alpha_cg", "x_np", "x_cg", "x_np_est",
 ]
+
+_LOG_LOCK = None
 
 def init_log():
     with open(LOG_CSV, "w", newline="") as f:
         csv.DictWriter(f, fieldnames=LOG_FIELDS).writeheader()
 
 def append_log(row):
-    with open(LOG_CSV, "a", newline="") as f:
-        csv.DictWriter(f, fieldnames=LOG_FIELDS, extrasaction="ignore").writerow(row)
+    with _LOG_LOCK or contextlib.nullcontext():
+        with open(LOG_CSV, "a", newline="") as f:
+            csv.DictWriter(f, fieldnames=LOG_FIELDS, extrasaction="ignore").writerow(row)
+
+def _init_worker(lock, log_csv):
+    # Workers ignore Ctrl+C so the main process can stop the pool cleanly
+    global _LOG_LOCK, LOG_CSV
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    _LOG_LOCK, LOG_CSV = lock, log_csv
+
+def make_pool():
+    # Each worker process gets its own openvsp instance; LOG_CSV is passed so all workers share one log
+    os.environ["VSP_POOL_WORKER"] = "1"
+    try:
+        return multiprocessing.Pool(N_WORKERS, initializer=_init_worker,
+                                    initargs=(multiprocessing.Lock(), LOG_CSV))
+    finally:
+        del os.environ["VSP_POOL_WORKER"]
 
 def lookup_best():
     best = None
@@ -165,6 +202,51 @@ def estimate_cd0(mac, s_ref, sweep_deg):
  
     s_wet = 2.0 * s_ref * (1.0 + 1.2 * TC_MAX)
     return float(cf * ff * s_wet / max(s_ref, 1e-12))
+
+def read_lod(lod_path):
+    # Spanwise strips per alpha from a VSPAERO .lod file: {alpha: {column: array}}
+    blocks, alpha, cols = {}, None, None
+    with open(lod_path, "r") as f:
+        for line in f:
+            t = line.split()
+            if not t:
+                continue
+            if t[0] == "AoA_":
+                alpha, cols = float(t[1]), None
+            elif t[0] == "Iter":
+                cols = t
+                blocks[alpha] = (cols, [])
+            elif cols is not None and len(t) == len(cols) and t[0].isdigit():
+                blocks[alpha][1].append([float(v) for v in t])
+            else:
+                cols = None  # end of the strip table (component table or next case)
+    return {a: {n: np.array([r[i] for r in rows]) for i, n in enumerate(header)}
+            for a, (header, rows) in blocks.items() if rows}
+
+_KULFAN = None
+
+def strip_cd0(lod_path, s_ref):
+    # Profile drag per alpha: NeuralFoil cd(cl_local, Re_local) integrated over the VSPAERO strips
+    global _KULFAN
+    import neuralfoil as nf
+    if _KULFAN is None:
+        import aerosandbox as asb
+        _KULFAN = asb.Airfoil(name="wing", coordinates=AIRFOIL_FILE).to_kulfan_airfoil().kulfan_parameters
+
+    out = {}
+    a_grid = np.linspace(-8.0, 18.0, 53)
+    for alpha, s in read_lod(lod_path).items():
+        re = RHO * VELOCITY * s["V/Vref"] * s["Chord"] / MU
+        aa, rr = np.meshgrid(a_grid, re)
+        r = nf.get_aero_from_kulfan_parameters(_KULFAN, alpha=aa.ravel(), Re=rr.ravel(),
+                                               n_crit=N_CRIT, model_size=NF_MODEL_SIZE)
+        cl_grid, cd_grid = r["CL"].reshape(aa.shape), r["CD"].reshape(aa.shape)
+        cd = np.empty(len(re))
+        for i in range(len(re)):
+            k = int(np.argmax(cl_grid[i])) + 1  # linear range up to section cl_max
+            cd[i] = np.interp(s["Cl"][i], cl_grid[i, :k], cd_grid[i, :k])
+        out[alpha] = float(np.sum(cd * s["dArea"]) / s_ref)
+    return out
 
 # VSP Helper Functions
 _ANALYSIS_INPUTS = {}
@@ -323,9 +405,13 @@ def _run_vspaero(vsp3_path, s_ref, b_ref, c_ref, x_cg, cd0,
     except KeyError:
         out["Beta"] = np.linspace(beta_start, beta_end, beta_npts)
  
-    # CDtot already includes VSPAERO's own CDo, so replace it with estimate_cd0
+    # CDtot already includes VSPAERO's own CDo, so replace it with our profile drag model
     if CDO_INPUT_NAME is None:
-        out["CD"] = _result_array(res_id, ["CDi"]) + float(cd0)
+        if PROFILE_DRAG_MODEL == "strip":
+            by_alpha = strip_cd0(os.path.splitext(vsp3_path)[0] + ".lod", s_ref)
+            cd0 = np.array([_pick(list(by_alpha.values()), list(by_alpha.keys()), a)
+                            for a in out["Alpha"]])
+        out["CD"] = _result_array(res_id, ["CDi"]) + cd0
  
     return out
 
@@ -338,7 +424,7 @@ def _pick(values, coord, target):
 
 # Objective Evaluation
 def evaluate_geometry(x):
-    root_chord, taper, sweep, washout, span, dihedral, alpha = x
+    root_chord, taper, sweep, washout, span, alpha = x
     g = planform(root_chord, taper, span)
     return np.array([g["ar"], g["tip_chord"]])
 
@@ -348,7 +434,7 @@ def _quad_pen(violation, scale):
     return PENALTY_WEIGHT * (violation / max(abs(scale), 1e-9)) ** 2
 
 def evaluate_aero_objective(x):
-    root_chord, taper, sweep, washout, span, dihedral, alpha = [float(v) for v in x]
+    root_chord, taper, sweep, washout, span, alpha = [float(v) for v in x]
     run_id = f"wing_{uuid.uuid4().hex[:8]}"
  
     try:
@@ -358,8 +444,8 @@ def evaluate_aero_objective(x):
         cd0 = estimate_cd0(mac, s_ref, sweep)
  
         vsp3_path, _ = generate_wing(run_id, span, root_chord, taper,
-                                     sweep, dihedral, washout)
- 
+                                     sweep, DIHEDRAL, washout)
+
         # Alpha sweep, moment reference at the root LE (x=0)
         r1 = _run_vspaero(
             vsp3_path, s_ref, span, mac, x_cg=0.0, cd0=cd0,
@@ -415,7 +501,7 @@ def evaluate_aero_objective(x):
                 "objective": round(objective, 6), "root_chord": round(root_chord, 6),
                 "taper": round(taper, 6),
                 "sweep": round(sweep, 6), "washout": round(washout, 6),
-                "span": round(span, 6), "dihedral": round(dihedral, 6),
+                "span": round(span, 6),
                 "alpha": round(alpha, 6), "AR": round(ar, 6),
                 "S_ref": round(s_ref, 6), "MAC": round(mac, 6),
                 "tip_chord": round(g["tip_chord"], 6),
@@ -447,7 +533,9 @@ def evaluate_aero_objective(x):
                 pass
 
 def visualize_stl(stl_path):
-    if pv is None:
+    try:
+        import pyvista as pv  # type: ignore
+    except ImportError:
         print("[info] pyvista not available; skipping visualization.")
         return
     if not os.path.exists(stl_path):
@@ -467,6 +555,7 @@ def main():
  
     print(f"[setup] airfoil t/c = {TC_MAX:.4f} at x/c = {X_TC_MAX:.3f}")
     print(f"[setup] q_inf = {Q_INF:.2f} Pa at V = {VELOCITY:.1f} m/s")
+    print(f"[setup] profile drag: {PROFILE_DRAG_MODEL}, {N_WORKERS} parallel VSPAERO cases")
     print("Starting SciPy DE optimization...\n")
  
     geom_constraint = NonlinearConstraint(
@@ -476,6 +565,7 @@ def main():
     )
  
     result = None
+    pool = make_pool()
     try:
         result = differential_evolution(
             evaluate_aero_objective,
@@ -491,10 +581,15 @@ def main():
             polish=False,
             seed=1,
             disp=True,
+            workers=pool.map,
+            updating="deferred",
         )
         print("\nOptimization finished.")
     except KeyboardInterrupt:
         print("\n\nInterrupted. Reporting the best feasible logged design.")
+    finally:
+        pool.terminate()
+        pool.join()
  
     row = lookup_best()
     if row is None:
@@ -504,7 +599,7 @@ def main():
         return
  
     p = {k: float(row[k]) for k in
-         ["root_chord", "taper", "sweep", "washout", "span", "dihedral", "alpha"]}
+         ["root_chord", "taper", "sweep", "washout", "span", "alpha"]}
  
     print("\n--- OPTIMAL WING ---")
     print("\n--- PARAMETERS ---")
@@ -532,7 +627,7 @@ def main():
  
     _, stl_path = generate_wing(
         "Optimized_Wing", p["span"], p["root_chord"], p["taper"],
-        p["sweep"], p["dihedral"], p["washout"], export_stl=True,
+        p["sweep"], DIHEDRAL, p["washout"], export_stl=True,
     )
     if stl_path:
         visualize_stl(stl_path)

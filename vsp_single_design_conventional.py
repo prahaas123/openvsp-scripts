@@ -228,6 +228,7 @@ def vsp_sweep(vsp3_path, velocity, Sref, bref, cref):
     vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
     vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [6]) 
     vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [velocity])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "ReCref", [1.225 * velocity * cref / 1.81e-5])  # VSPAERO defaults to 1e7
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
     vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
     vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", [f"{vsp3_path}_log.txt"])
@@ -265,6 +266,7 @@ def vsp_stability(vsp3_path, v, Sref, bref, cref):
     vsp.SetIntAnalysisInput(aero_analysis, "MachNpts", [1])
     vsp.SetIntAnalysisInput(aero_analysis, "WakeNumIter", [6]) 
     vsp.SetDoubleAnalysisInput(aero_analysis, "Vinf", [v])
+    vsp.SetDoubleAnalysisInput(aero_analysis, "ReCref", [1.225 * v * cref / 1.81e-5])
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
     vsp.SetIntAnalysisInput(aero_analysis, "UnsteadyType", [1])
     vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])

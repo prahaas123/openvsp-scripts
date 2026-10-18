@@ -12,8 +12,8 @@ from scipy.interpolate import RBFInterpolator
 
 from vsp_optimization import (
     VAR_NAMES, BOUNDS, Q_INF, ALPHA_STEP_DEG, STATIC_MARGIN,
-    CM_TOL, AR_MIN, AR_MAX, TIP_CHORD_MIN,
-    planform, total_weight, estimate_cd0, generate_wing, _run_vspaero, _pick,
+    CM_TOL, AR_MIN, AR_MAX, TIP_CHORD_MIN, DIHEDRAL,
+    planform, total_weight, estimate_cd0, generate_wing, _run_vspaero, _pick, make_pool,
 )
 
 N_SAMPLES = 256
@@ -36,7 +36,7 @@ HI = np.array([b[1] for b in BOUNDS])
 ND = len(VAR_NAMES)
 
 def evaluate(x):
-    root_chord, taper, sweep, washout, span, dihedral, alpha = [float(v) for v in x]
+    root_chord, taper, sweep, washout, span, alpha = [float(v) for v in x]
     run_id = f"dse_{uuid.uuid4().hex[:8]}"
     try:
         g = planform(root_chord, taper, span)
@@ -45,7 +45,7 @@ def evaluate(x):
         cd0 = estimate_cd0(mac, s_ref, sweep)
 
         vsp3_path, _ = generate_wing(run_id, span, root_chord, taper,
-                                     sweep, dihedral, washout)
+                                     sweep, DIHEDRAL, washout)
         r = _run_vspaero(vsp3_path, s_ref, span, mac, x_cg=0.0, cd0=cd0,
                          alpha_start=alpha - ALPHA_STEP_DEG,
                          alpha_end=alpha + ALPHA_STEP_DEG, alpha_npts=3)
@@ -129,14 +129,14 @@ def sample():
     pts = qmc.Sobol(d=ND, scramble=True, seed=1).random(N_SAMPLES)
     pts = LO + pts * (HI - LO)
     print(f"[sample] resuming at {done}/{N_SAMPLES}")
-    for i in range(done, N_SAMPLES):
-        row = evaluate(pts[i])
-        if row is None:
-            continue
-        append(SAMPLE_CSV, row)
-        tag = "FEASIBLE" if row["feasible"] else "infeasible"
-        print(f"  [{i + 1}/{N_SAMPLES}] {tag:10s} D={row['drag']:.4f} N  "
-              f"L/D={row['LD']:.2f}  AR={row['AR']:.2f}")
+    with make_pool() as pool:
+        for i, row in zip(range(done, N_SAMPLES), pool.imap(evaluate, pts[done:])):
+            if row is None:
+                continue
+            append(SAMPLE_CSV, row)
+            tag = "FEASIBLE" if row["feasible"] else "infeasible"
+            print(f"  [{i + 1}/{N_SAMPLES}] {tag:10s} D={row['drag']:.4f} N  "
+                  f"L/D={row['LD']:.2f}  AR={row['AR']:.2f}")
 
 def baseline(d):
     m = d["feasible"] > 0.5
@@ -151,11 +151,14 @@ def oat(d):
         return
     x0 = baseline(d)
     print(f"[oat] baseline = {dict(zip(VAR_NAMES, np.round(x0, 4)))}")
+    cases = []
     for j, name in enumerate(VAR_NAMES):
         for val in np.linspace(LO[j], HI[j], OAT_NPTS):
             x = x0.copy()
             x[j] = val
-            row = evaluate(x)
+            cases.append((name, val, x))
+    with make_pool() as pool:
+        for (name, val, _), row in zip(cases, pool.imap(evaluate, [c[2] for c in cases])):
             if row is None:
                 continue
             append(OAT_CSV, row)
