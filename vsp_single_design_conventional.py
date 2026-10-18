@@ -20,6 +20,7 @@ airfoil_file = os.path.join("Airfoils", "goe332.dat")
 x_cg = 0.065
 
 wing_params = {
+    
     "span": 1.18,         # [m]
     "root_chord": 0.36,   # [m]
     "taper": 1.0,         # [Ratio]
@@ -41,7 +42,7 @@ vtail_params = {
     "chord": 0.20,
     "airfoil": "0012",
     "span": 0.25,
-    "taper": 0.0,
+    "taper": 1.0,
     "sweep": 0.0       # [deg] Leading Edge Sweep
 }
 
