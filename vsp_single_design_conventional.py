@@ -16,12 +16,12 @@ velocities = list(range(10, 50, 5)) # m/s
 alphas = list(range(-5, 15)) # degrees AoA
 
 stability_velocity = 30.0 # m/s
-airfoil_file = os.path.join("Airfoils", "goe322.dat")
+airfoil_file = os.path.join("Airfoils", "goe332.dat")
 x_cg = 0.065
 
 wing_params = {
-    "span": 1.19,          # [m]
-    "root_chord": 0.225,   # [m]
+    "span": 1.18,         # [m]
+    "root_chord": 0.36,   # [m]
     "taper": 1.0,         # [Ratio]
     "sweep": 0.0,         # [deg] Leading Edge Sweep
     "dihedral": 0.0,      # [deg]
@@ -30,19 +30,19 @@ wing_params = {
 }
 
 htail_params = {
-    "chord": 0.128,
-    "l_H": 0.65,        # [m] Tail LE position aft of wing root LE (htail_x_le in tail_sizing_options.csv)
+    "chord": 0.20,
+    "l_H": 0.61,        # [m] Tail LE position aft of wing root LE (htail_x_le in tail_sizing_options.csv)
     "airfoil": "0012",
-    "span": 0.383,
-    "alpha": 3.35
+    "span": 0.51,
+    "alpha": -3.5
 }
 
 vtail_params = {
-    "chord": 0.128,
+    "chord": 0.20,
     "airfoil": "0012",
-    "span": 0.18,
-    "taper": 0.7,
-    "sweep": 15.0       # [deg] Leading Edge Sweep
+    "span": 0.25,
+    "taper": 0.0,
+    "sweep": 0.0       # [deg] Leading Edge Sweep
 }
 
 # Stability targets
