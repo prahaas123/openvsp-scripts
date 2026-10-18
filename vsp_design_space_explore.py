@@ -12,7 +12,7 @@ from scipy.interpolate import RBFInterpolator
 
 from vsp_optimization import (
     VAR_NAMES, BOUNDS, Q_INF, ALPHA_STEP_DEG, STATIC_MARGIN,
-    CM_TOL, CMA_MAX, AR_MIN, AR_MAX, TIP_CHORD_MIN,
+    CM_TOL, AR_MIN, AR_MAX, TIP_CHORD_MIN,
     planform, total_weight, estimate_cd0, generate_wing, _run_vspaero, _pick,
 )
 
@@ -26,7 +26,7 @@ FREEZE_FRAC = 0.02       # OAT drag range below this fraction of median drag -> 
 SAMPLE_CSV = "dse_samples.csv"
 OAT_CSV = "dse_oat.csv"
 
-CONSTRAINTS = ["lift", "trim", "cma", "ar_min", "ar_max", "tip_chord"]
+CONSTRAINTS = ["lift", "trim", "ar_min", "ar_max", "tip_chord"]
 DERIVED = ["AR", "S_ref", "MAC", "tip_chord", "CL", "CD", "LD", "drag", "lift",
            "weight", "CM_cg", "CM_alpha_cg", "x_np", "x_cg", "feasible"]
 FIELDS = VAR_NAMES + DERIVED + [f"v_{c}" for c in CONSTRAINTS]
@@ -72,7 +72,6 @@ def evaluate(x):
         v = {
             "lift": (weight - lift) / weight,
             "trim": (abs(cm_cg) - CM_TOL) / CM_TOL,
-            "cma": (cm_alpha_cg - CMA_MAX) / abs(CMA_MAX),
             "ar_min": (AR_MIN - ar) / AR_MIN,
             "ar_max": (ar - AR_MAX) / AR_MAX,
             "tip_chord": (TIP_CHORD_MIN - g["tip_chord"]) / TIP_CHORD_MIN,

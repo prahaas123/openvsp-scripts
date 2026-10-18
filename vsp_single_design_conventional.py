@@ -1,7 +1,7 @@
 import os
-import pyvista as pv
 import csv
 import glob
+import uuid
 import numpy as np
 import openvsp as vsp # type: ignore
 import shutil
@@ -16,7 +16,7 @@ velocities = list(range(10, 50, 5)) # m/s
 alphas = list(range(-5, 15)) # degrees AoA
 
 stability_velocity = 30.0 # m/s
-airfoil_file = r"Airfoils\goe322.dat"
+airfoil_file = os.path.join("Airfoils", "goe322.dat")
 x_cg = 0.065
 
 wing_params = {
@@ -31,7 +31,7 @@ wing_params = {
 
 htail_params = {
     "chord": 0.128,
-    "l_H": 0.65,        # [m] Tail Moment Arm (Distance from CG to Tail AC)
+    "l_H": 0.65,        # [m] Tail LE position aft of wing root LE (htail_x_le in tail_sizing_options.csv)
     "airfoil": "0012",
     "span": 0.383,
     "alpha": 3.35
@@ -61,11 +61,15 @@ stability_targets = {
 }
 
 def main():
+    Cr  = wing_params["root_chord"]
+    lam = wing_params["taper"]
     bref = wing_params["span"]
-    cref = wing_params["root_chord"]
-    Sref = 0.5 * (cref + (cref * wing_params["taper"])) * bref
-    
-    _, PLANE = generate_wing_and_tail("Conventional")
+    Sref = 0.5 * (Cr + Cr * lam) * bref
+    cref = (2.0 / 3.0) * Cr * (1.0 + lam + lam ** 2) / (1.0 + lam)  # mean aero chord (MAC)
+
+    run_id = f"conv_{uuid.uuid4().hex[:8]}"
+    case = f"{run_id}_plane"
+    _, PLANE = generate_wing_and_tail(run_id)
     
     try:
         os.remove("aero_full.csv")
@@ -77,9 +81,9 @@ def main():
     csv_exists = False
     for v in velocities:
         print(f"\n=== Running VSP Aero Sweep at {v} m/s ===")
-        vsp3_path = shutil.copy(PLANE, "plane.vsp3")
+        vsp3_path = shutil.copy(PLANE, f"{case}.vsp3")
         CL, CD, CDi, Cm = vsp_sweep(vsp3_path, v, Sref, bref, cref)
-        e_fit = oswald_from_polar(CL, CD, Sref, bref)
+        e_fit = oswald_from_polar(CL, CDi, Sref, bref)
         aero_headers = ["Velocity", "Alpha_deg", "CL", "CD", "Cm", "Lift", "Drag", "Oswald_efficiency"]
 
         aero_results = []
@@ -99,7 +103,7 @@ def main():
             writer.writerows(aero_results)
 
         # File Cleanup
-        for filename in glob.glob("plane*"):
+        for filename in glob.glob(f"{case}*"):
             try:
                 os.remove(filename)
             except OSError:
@@ -108,9 +112,9 @@ def main():
     # Stability
     v = stability_velocity
     print(f"\n=== Running VSP Stability at {v} m/s (cruise) ===")
-    vsp3_path = shutil.copy(PLANE, "plane.vsp3")
+    vsp3_path = shutil.copy(PLANE, f"{case}.vsp3")
     vsp_stability(vsp3_path, v, Sref, bref, cref)
-    stab_dict = read_stability("plane.stab")
+    stab_dict = read_stability(f"{case}.stab")
 
     stability_filename = "stability.csv"
     stab_headers = ["Velocity"] + list(stab_dict.keys())
@@ -121,13 +125,7 @@ def main():
         writer.writerow(stab_headers)
         writer.writerow(stab_columns)
 
-    for filename in glob.glob("plane*"):
-        try:
-            os.remove(filename)
-        except OSError:
-            pass
-            
-    for filename in glob.glob("Conventional*"):
+    for filename in glob.glob(f"{run_id}*"):
         try:
             os.remove(filename)
         except OSError:
@@ -140,7 +138,6 @@ def main():
         print(f"[dashboard] skipped: {exc}")
 
 def generate_wing_and_tail(plane_name):
-    airfoil_fwd  = airfoil_file.replace("\\", "/")
     tip_chord    = wing_params["root_chord"] * wing_params["taper"]
     vtail_tip    = vtail_params["chord"] * vtail_params["taper"]
 
@@ -177,9 +174,10 @@ def generate_wing_and_tail(plane_name):
     vsp.SetParmVal(hid, "Sweep", "XSec_1", 0.0)
     vsp.SetParmVal(hid, "X_Rel_Location", "XForm", htail_params["l_H"])
     vsp.SetParmVal(hid, "Y_Rel_Rotation", "XForm", htail_params["alpha"])
-    vsp.SetParmVal(hid, "Camber", "XSecCurve_0", h_camber)
-    vsp.SetParmVal(hid, "CamberLoc", "XSecCurve_0", h_cam_loc)
-    vsp.SetParmVal(hid, "ThickChord", "XSecCurve_0", h_thick)
+    for i in [0, 1]:
+        vsp.SetParmVal(hid, "Camber", f"XSecCurve_{i}", h_camber)
+        vsp.SetParmVal(hid, "CamberLoc", f"XSecCurve_{i}", h_cam_loc)
+        vsp.SetParmVal(hid, "ThickChord", f"XSecCurve_{i}", h_thick)
     vsp.SetSetFlag(hid, 1, True)
 
     # Vertical Tail
@@ -192,9 +190,10 @@ def generate_wing_and_tail(plane_name):
     vsp.SetParmVal(vid, "Sweep", "XSec_1", 0.0)
     vsp.SetParmVal(vid, "X_Rel_Location", "XForm", htail_params["l_H"])
     vsp.SetParmVal(vid, "X_Rel_Rotation", "XForm", 90.0)
-    vsp.SetParmVal(vid, "Camber", "XSecCurve_0", v_camber)
-    vsp.SetParmVal(vid, "CamberLoc", "XSecCurve_0", v_cam_loc)
-    vsp.SetParmVal(vid, "ThickChord", "XSecCurve_0", v_thick)
+    for i in [0, 1]:
+        vsp.SetParmVal(vid, "Camber", f"XSecCurve_{i}", v_camber)
+        vsp.SetParmVal(vid, "CamberLoc", f"XSecCurve_{i}", v_cam_loc)
+        vsp.SetParmVal(vid, "ThickChord", f"XSecCurve_{i}", v_thick)
     vsp.SetSetFlag(vid, 1, True)
 
     vsp.Update()
@@ -232,7 +231,7 @@ def vsp_sweep(vsp3_path, velocity, Sref, bref, cref):
     vsp.SetDoubleAnalysisInput(aero_analysis, "Xcg", [x_cg])
     vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
     vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", [f"{vsp3_path}_log.txt"])
-    rid = vsp.ExecAnalysis(aero_analysis)
+    vsp.ExecAnalysis(aero_analysis)
 
     # Results
     polar_res = vsp.FindLatestResultsID("VSPAERO_Polar")
@@ -271,34 +270,6 @@ def vsp_stability(vsp3_path, v, Sref, bref, cref):
     vsp.SetIntAnalysisInput(aero_analysis, "NCPU", [8])
     vsp.SetStringAnalysisInput(aero_analysis, "RedirectFile", [f"{vsp3_path}_log.txt"])
     vsp.ExecAnalysis(aero_analysis)
-
-def parse_polar(polar_path):
-    CL, CD, CDi, Cm = [], [], [], []
-    col_cl = col_cd = col_cm = None
-
-    with open(polar_path, 'r') as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped or stripped.startswith('#'):
-                continue
-            tokens = stripped.split()
-            if tokens[0] == 'Beta':
-                col_cl = tokens.index('CLtot')
-                col_cd = tokens.index('CDtot')
-                col_cdi = tokens.index('CDi')
-                col_cm = tokens.index('CMytot')
-                continue
-            if col_cl is None:
-                continue
-            try:
-                CL.append(float(tokens[col_cl]))
-                CD.append(float(tokens[col_cd]))
-                CDi.append(float(tokens[col_cdi]))
-                Cm.append(float(tokens[col_cm]))
-            except (ValueError, IndexError):
-                continue
-
-    return CL, CD, CDi, Cm
 
 def read_stability(stab_path): 
     col_alpha = col_beta = col_p = col_q = col_r = None
@@ -364,62 +335,19 @@ def read_stability(stab_path):
     }
  
     return vsp_dict
-    
-def read_lift_distribution(filepath, target_vortex_sheet=1):
-    data_by_aoa = {}
-    current_aoa = None
-    
-    with open(filepath, 'r') as file:
-        for line in file:
-            line = line.strip()
-            if not line:
-                continue
-                
-            if line.startswith("AoA_"):
-                parts = line.split()
-                current_aoa = float(parts[1])
-                
-                if current_aoa not in data_by_aoa:
-                    data_by_aoa[current_aoa] = {'SoverB': [], 'Cl': []}
-            
-            else:
-                parts = line.split()
-                if len(parts) > 15:
-                    try:
-                        vortex_sheet = int(parts[1])
-                        if vortex_sheet == target_vortex_sheet and current_aoa is not None:
-                            soverb = float(parts[7])
-                            cl = float(parts[11])
-                            data_by_aoa[current_aoa]['SoverB'].append(soverb)
-                            data_by_aoa[current_aoa]['Cl'].append(cl)
-                            
-                    except ValueError:
-                        pass
-                        
-    return data_by_aoa
 
-def oswald_from_polar(CL, CD, Sref, bref):
+def oswald_from_polar(CL, CDi, Sref, bref):
+    # Fit induced drag only, so profile drag and camber don't bias e
     AR = bref ** 2 / Sref
     CL = np.asarray(CL, dtype=float)
-    CD = np.asarray(CD, dtype=float)
-    mask = np.isfinite(CL) & np.isfinite(CD)
+    CDi = np.asarray(CDi, dtype=float)
+    mask = np.isfinite(CL) & np.isfinite(CDi)
     if mask.sum() < 2:
         return float("nan")
-    k, _cd0 = np.polyfit(CL[mask] ** 2, CD[mask], 1)  # slope k = 1/(pi*AR*e)
+    k, _ = np.polyfit(CL[mask] ** 2, CDi[mask], 1)  # slope k = 1/(pi*AR*e)
     if not np.isfinite(k) or k <= 1e-9:  # near-zero slope => degenerate/flat polar
         return float("nan")
     return float(1.0 / (np.pi * AR * k))
-
-def compute_oswald(cl, cdi, s, b):
-    AR = (b ** 2) / s
-    cl_array = np.array(cl, dtype=float)
-    cdi_array = np.array(cdi, dtype=float)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        e = (cl_array ** 2) / (np.pi * AR * cdi_array)
-        e = np.where(np.isfinite(e), e, 0.0)
-    if e.ndim == 0:
-        return float(e)
-    return e
 
 def grade_stability(key, val):
     t = stability_targets.get(key)
@@ -450,7 +378,6 @@ def plot_dashboard(sweep_csv="aero_full.csv", stab_csv="stability.csv"):
     stab = pd.read_csv(stab_csv).iloc[0].to_dict()
 
     velocities_sorted = sorted(df["Velocity"].unique())
-    scale = pio.templates
     n = max(len(velocities_sorted) - 1, 1)
     vel_colors = {
         v: pv_color for v, pv_color in zip(

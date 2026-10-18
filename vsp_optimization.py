@@ -3,6 +3,7 @@ import csv
 import glob
 import uuid
 import math
+import time
 import numpy as np
 import openvsp as vsp  # type: ignore
 from scipy.optimize import differential_evolution, NonlinearConstraint
@@ -39,7 +40,6 @@ def total_weight(span, s_ref):
 # Constraint Targets
 STATIC_MARGIN = 0.05
 CM_TOL = 0.02
-CMA_MAX = -0.05
 AR_MIN = 2.0
 AR_MAX = 6.0
 TIP_CHORD_MIN = 0.05
@@ -63,13 +63,13 @@ WAKE_NUM_ITER = 5
 NCPU = 8
 
 # Logging
-LOG_CSV = "optimization_results.csv"
+LOG_CSV = f"optimization_results_{time.strftime('%Y%m%d_%H%M%S')}.csv"
 LOG_FIELDS = [
     "run_id", "objective",
     "root_chord", "taper", "sweep", "washout", "span", "dihedral", "alpha",
     "AR", "S_ref", "MAC", "tip_chord", "mass_kg", "weight", "lift", "lift_margin",
     "CL", "CD", "LD", "drag_N",
-    "CM_cg", "CM_alpha_cg", "x_np", "x_cg", "SM_actual",
+    "CM_cg", "CM_alpha_cg", "x_np", "x_cg", "x_np_est",
 ]
 
 def init_log():
@@ -323,8 +323,9 @@ def _run_vspaero(vsp3_path, s_ref, b_ref, c_ref, x_cg, cd0,
     except KeyError:
         out["Beta"] = np.linspace(beta_start, beta_end, beta_npts)
  
+    # CDtot already includes VSPAERO's own CDo, so replace it with estimate_cd0
     if CDO_INPUT_NAME is None:
-        out["CD"] = out["CD"] + float(cd0)
+        out["CD"] = _result_array(res_id, ["CDi"]) + float(cd0)
  
     return out
 
@@ -394,7 +395,6 @@ def evaluate_aero_objective(x):
  
         # Moment about the CG at the design alpha (shift theorem, no extra run).
         cm_cg = cm_0 + cl_0 * x_cg / mac
-        sm_actual = (x_np - x_cg) / mac
         cm_alpha_cg = cm_alpha + cl_alpha * x_cg / mac
  
         # Forces
@@ -405,8 +405,7 @@ def evaluate_aero_objective(x):
         # Penalties
         pen_lift = _quad_pen(weight - lift, weight)
         pen_trim = _quad_pen(abs(cm_cg) - CM_TOL, max(CM_TOL, 1e-3))
-        pen_cma = _quad_pen(cm_alpha_cg - CMA_MAX, max(abs(CMA_MAX), 1e-3))
-        penalty = pen_lift + pen_trim + pen_cma
+        penalty = pen_lift + pen_trim
         feasible = penalty <= 0.0
         objective = drag + penalty
         
@@ -426,13 +425,12 @@ def evaluate_aero_objective(x):
                 "LD": round(ld, 6), "drag_N": round(drag, 6),
                 "CM_cg": round(cm_cg, 6), "CM_alpha_cg": round(cm_alpha_cg, 6),
                 "x_np": round(x_np, 6), "x_cg": round(x_cg, 6),
-                "SM_actual": round(sm_actual, 6),
+                "x_np_est": round(x_np_est, 6),
             })
  
         tag = "FEASIBLE" if feasible else "infeasible"
         print(f"  [{run_id}] {tag:10s} D={drag:.4f} N  obj={objective:.4f}  "
               f"L/D={ld:.2f}  L-W={lift - weight:+.3f} N  CMcg={cm_cg:+.4f}  "
-              f"CMa={cm_alpha_cg:+.4f}  "
               f"m={weight/9.81:.3f} kg  AR={ar:.2f}")
  
         return float(objective)
@@ -517,7 +515,8 @@ def main():
     for k in ["S_ref", "AR", "MAC", "tip_chord"]:
         print(f"{k:12s}: {float(row[k]):.4f}")
     print(f"{'x_np':12s}: {float(row['x_np']):.4f} m aft of root LE")
-    print(f"{'x_cg':12s}: {float(row['x_cg']):.4f} m  (SM = {float(row['SM_actual']) * 100:.2f}% MAC)")
+    print(f"{'x_np_est':12s}: {float(row['x_np_est']):.4f} m  (quarter-MAC estimate)")
+    print(f"{'x_cg':12s}: {float(row['x_cg']):.4f} m  (SM = {STATIC_MARGIN * 100:.2f}% MAC)")
  
     print("\n--- AERODYNAMICS ---")
     for k in ["CL", "CD", "LD", "drag_N", "CM_cg", "CM_alpha_cg"]:
