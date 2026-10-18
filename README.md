@@ -8,17 +8,18 @@ Python scripts to automate aerodynamic analysis and concept design workflows usi
 
 - Install [OpenVSP 3.47.0+](http://openvsp.org/)
 - Create a venv and compile the openvsp Python API
+- `pip install neuralfoil`
 
 ---
 
 ### `vsp_design_space_explore.py`
 
-Design space exploration — Monte Carlo analysis of the various possible parameter configurations.
+Design space exploration over the same variables and constraints as `vsp_optimization.py`.
 
-- Varies geometric parameters (span, chord, sweep, taper, twist, etc.) across a defined grid
-- Runs VSPAERO for each configuration and records CL, CD, and L/D
-- Writes all results to `sweep_results.csv`
-- Visualizes results using pareto fronts, parallel coordinate plots, and splom plots
+- Sobol samples of the design variables, then one-at-a-time sweeps around the median feasible design
+- Reports constraint activity, drag sensitivity per variable, and tightened bounds for the optimizer
+- Writes results to `dse_samples.csv` and `dse_oat.csv` (reruns resume from these files)
+- Runs VSPAERO cases in parallel, one per CPU core
 
 ---
 
@@ -26,9 +27,11 @@ Design space exploration — Monte Carlo analysis of the various possible parame
 
 Single-objective aerodynamic optimization using OpenVSP + VSPAERO as the analysis backend.
 
-- Optimizes wing geometry parameters using the differetial evolution method
-- Maximizes a performance metric (can just be L/D or a weighted sum of various objectives)
-- Records the full optimization history to `optimization_results.csv`
+- Optimizes root chord, taper, sweep, washout, span and alpha using differential evolution (dihedral is a fixed input)
+- Minimizes cruise drag at a fixed airspeed, subject to lift ≥ weight (from the built-in weight model), trim at the target static margin, and AR / tip chord limits
+- Profile drag comes from NeuralFoil cd(cl, Re) integrated over the VSPAERO spanwise strips (`PROFILE_DRAG_MODEL = "flat_plate"` switches to a flat-plate estimate)
+- Runs VSPAERO cases in parallel, one per CPU core
+- Records feasible designs to a timestamped `optimization_results_<date>_<time>.csv`
 
 ---
 
@@ -36,9 +39,10 @@ Single-objective aerodynamic optimization using OpenVSP + VSPAERO as the analysi
 
 Automated horizontal tail sizing and pitch trim analysis using a secant method iteration loop.
 
-- Sizes the horizontal tail area from a target tail volume coefficient (`V_H`)
+- Sizes the horizontal tail area from a target tail volume coefficient (`V_H`), with `l_H` measured wing AC to tail AC
+- Places the CG at the target static margin ahead of the VSPAERO neutral point
 - Iteratively adjusts tail incidence angle until the pitching moment coefficient `CMy ≈ 0` at the design alpha
-- Reports final trim incidence, tail chord, and tail span
+- Writes trim incidence, tail chord and span, tail LE position, NP and CG to `tail_sizing_options.csv`
 
 ---
 
@@ -56,7 +60,7 @@ Runs a full aero + stability analysis on a tailless flying/delta wing configurat
 
 Runs a full aero + stability analysis on a conventional aircraft configuration (wing + horizontal tail + vertical tail).
 
-- Builds a conventional aircraft with a wing, tails, and ailerons/elevators/rudder control surfaces
+- Builds a conventional aircraft with a wing, horizontal tail and vertical tail
 - Runs a VSPAERO VLM sweep and writes polar results to `aero_full.csv`
 - Runs a stability derivative analysis and writes results to `stability.csv`
 
@@ -64,7 +68,7 @@ Runs a full aero + stability analysis on a conventional aircraft configuration (
 
 ### `constraint_analysis.py`
 
-Generates an aircraft constraint diagram by evaluating the required Thrust-to-Weight ratio (T/W) against Wing Loading (W/S). It calculates and visualizes the performance boundaries for takeoff, cruise, and landing requirements, ultimately shading the feasible design space for initial aircraft sizing.
+Generates an aircraft constraint diagram by evaluating the required Thrust-to-Weight ratio (T/W) against Wing Loading (W/S). It calculates and visualizes the performance boundaries for takeoff, cruise, landing and stall speed requirements, ultimately shading the feasible design space for initial aircraft sizing. Takeoff and landing use ground-roll physics with rolling friction and aerodynamic drag.
 
 ---
 
@@ -79,7 +83,7 @@ Takes 2D cross sectional images of a given wing/body and creates a .dat airfoil 
 At the top of each script, set:
 
 ```python
-airfoil_file = r"path\to\your\airfoil.dat"               # path to airfoil .dat file
+airfoil_file = os.path.join("Airfoils", "your_airfoil.dat")   # path to airfoil .dat file
 ```
 
 The `Airfoils/` directory contains `.dat` airfoil coordinate files in Selig format.

@@ -12,11 +12,11 @@ import contextlib
 import multiprocessing
 
 # openvsp writes a fixed %TEMP%\temp.txt on import, so parallel workers each get their own TEMP.
-# make_pool() flags its workers through the environment, which they inherit before any import runs.
-if os.environ.pop("VSP_POOL_WORKER", None):
-    _worker_tmp = tempfile.mkdtemp(prefix="vsp_worker_")
-    os.environ["TEMP"] = os.environ["TMP"] = _worker_tmp
-    atexit.register(shutil.rmtree, _worker_tmp, True)
+# make_pool() passes workers a parent folder through the environment, which they inherit before
+# any import runs; the main process deletes it on exit (terminated workers can't clean up).
+_POOL_TMP = os.environ.pop("VSP_POOL_TMP", None)
+if _POOL_TMP:
+    os.environ["TEMP"] = os.environ["TMP"] = tempfile.mkdtemp(prefix="worker_", dir=_POOL_TMP)
 
 import numpy as np
 import openvsp as vsp  # type: ignore
@@ -110,12 +110,14 @@ def _init_worker(lock, log_csv):
 
 def make_pool():
     # Each worker process gets its own openvsp instance; LOG_CSV is passed so all workers share one log
-    os.environ["VSP_POOL_WORKER"] = "1"
+    pool_tmp = tempfile.mkdtemp(prefix="vsp_pool_")
+    atexit.register(shutil.rmtree, pool_tmp, True)
+    os.environ["VSP_POOL_TMP"] = pool_tmp
     try:
         return multiprocessing.Pool(N_WORKERS, initializer=_init_worker,
                                     initargs=(multiprocessing.Lock(), LOG_CSV))
     finally:
-        del os.environ["VSP_POOL_WORKER"]
+        del os.environ["VSP_POOL_TMP"]
 
 def lookup_best():
     best = None

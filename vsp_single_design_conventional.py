@@ -42,7 +42,7 @@ vtail_params = {
     "airfoil": "0012",
     "span": 0.18,
     "taper": 0.7,
-    "sweep": 15.0
+    "sweep": 15.0       # [deg] Leading Edge Sweep
 }
 
 # Stability targets
@@ -187,7 +187,7 @@ def generate_wing_and_tail(plane_name):
     vsp.SetParmVal(vid, "TotalSpan", "WingGeom", vtail_params["span"])
     vsp.SetParmVal(vid, "Root_Chord", "XSec_1", vtail_params["chord"])
     vsp.SetParmVal(vid, "Tip_Chord", "XSec_1", vtail_tip)
-    vsp.SetParmVal(vid, "Sweep", "XSec_1", 0.0)
+    vsp.SetParmVal(vid, "Sweep", "XSec_1", vtail_params["sweep"])
     vsp.SetParmVal(vid, "X_Rel_Location", "XForm", htail_params["l_H"])
     vsp.SetParmVal(vid, "X_Rel_Rotation", "XForm", 90.0)
     for i in [0, 1]:
