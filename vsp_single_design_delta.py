@@ -45,11 +45,11 @@ def main():
     case = f"{run_id}_plane"
     _, PLANE = generate_delta_wing(run_id)
 
-    try:
-        os.remove("aero_full.csv")
-        os.remove("stability.csv")
-    except OSError:
-        pass
+    for old_csv in ("aero_full.csv", "stability.csv"):
+        try:
+            os.remove(old_csv)
+        except OSError:
+            pass
 
     # Aero sweep
     csv_exists = False
@@ -89,8 +89,8 @@ def main():
     stab_dict = read_stability(f"{case}.stab")
 
     stability_filename = "stability.csv"
-    stab_headers = ["Velocity"] + list(stab_dict.keys())
-    stab_columns = [v] + list(stab_dict.values())
+    stab_headers = ["Velocity", "Sref", "cref", "bref"] + list(stab_dict.keys())
+    stab_columns = [v, Sref, cref, bref] + list(stab_dict.values())
 
     with open(stability_filename, 'a', newline='') as f:
         writer = csv.writer(f)
