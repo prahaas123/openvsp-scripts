@@ -12,11 +12,12 @@ velocity = 10 # m/s
 alpha = 0 # degrees AoA
 SM = 0.10  # desired Static Margin
 
-airfoil_file = r"Airfoils\goe322.dat"
+airfoil_file = os.path.join("Airfoils", "goe322.dat")
 output_csv = "tail_sizing_options.csv"
 
-moment_tolerance = 0.05
+moment_tolerance = 0.002
 tail_sizing_iterations = 10
+np_alpha_step = 1.0 # degrees, +/- around alpha for the VSPAERO neutral point
 
 # Every combination of wing config x tail moment arm x tail AR is sized
 wing_configs = [
@@ -42,7 +43,7 @@ wing_configs = [
     },
 ]
 
-tail_moment_arms = [0.45, 0.52, 0.60]  # l_H [m]
+tail_moment_arms = [0.45, 0.52, 0.60]  # l_H [m], wing AC to tail AC
 htail_aspect_ratios = [2.5, 3.0, 3.5]
 
 htail_params = {
@@ -59,7 +60,7 @@ csv_fields = [
     "wing_name", "wing_span", "wing_root_chord", "wing_taper", "wing_sweep",
     "wing_dihedral", "wing_twist", "wing_incidence", "wing_area",
     "l_H", "htail_AR", "htail_span", "htail_chord", "vtail_height",
-    "tail_incidence", "converged"
+    "htail_x_le", "x_np", "x_cg", "tail_incidence", "converged"
 ]
 
 def main():
@@ -70,13 +71,7 @@ def main():
         writer.writeheader()
 
         for wing in wing_configs:
-            S_w, MAC = wing_geometry(wing)
-
-            # Generate just main wing to get initial moment
-            name = f"wing_{uuid.uuid4().hex[:8]}"
-            vsp3_path = generate_wing(name, wing)
-            plain_moment = get_moment(vsp3_path, 0.25 * MAC, S_w, MAC, wing["span"])
-            print(f"[{wing['name']}] Cmy at alpha={alpha} deg: {plain_moment:.6f} (without a tail)")
+            S_w, _ = wing_geometry(wing)
 
             for l_H, AR_t in itertools.product(tail_moment_arms, htail_aspect_ratios):
                 htail = dict(htail_params, l_H=l_H, aspect_ratio=AR_t)
@@ -112,16 +107,31 @@ def size_tail(wing, htail):
     # Vertical tail shares the horizontal tail chord, so height = S_V / chord
     S_vtail = vtail_params["V_V"] * S_w * wing["span"] / htail["l_H"]
     vtail_height = S_vtail / tail_chord
-    x_cg = calc_cg(S_tail, wing, htail)
+
+    # Place the tail so its quarter chord sits l_H behind the wing AC
+    tail_x_le = wing_ac_x(wing) + htail["l_H"] - 0.25 * tail_chord
+
+    def build(tail_alpha):
+        tail_name = f"plane_{uuid.uuid4().hex[:8]}"
+        return generate_wing_and_tail(tail_name, wing, htail, b_tail, tail_alpha, vtail_height, tail_x_le)
+
+    # Neutral point from VSPAERO: CMy slope about the wing root LE (x = 0)
+    alphas = [alpha - np_alpha_step, alpha, alpha + np_alpha_step]
+    CL, CM = run_vspaero(build(0.0), 0.0, S_w, MAC, wing["span"], alphas)
+    d_alpha = 2 * math.radians(np_alpha_step)
+    cl_alpha = (CL[2] - CL[0]) / d_alpha
+    cm_alpha = (CM[2] - CM[0]) / d_alpha
+    x_np = -MAC * cm_alpha / cl_alpha
+    x_cg = x_np - SM * MAC
+    print(f"NP = {x_np:.4f} m, CG = {x_cg:.4f} m from wing LE (SM = {SM * 100:.0f}% MAC)")
 
     def trim_moment(tail_alpha):
-        tail_name = f"plane_{uuid.uuid4().hex[:8]}"
-        vsp3_path = generate_wing_and_tail(tail_name, wing, htail, b_tail, tail_alpha, vtail_height)
-        return get_moment(vsp3_path, x_cg, S_w, MAC, wing["span"])
+        _, cm = run_vspaero(build(tail_alpha), x_cg, S_w, MAC, wing["span"], [alpha])
+        return cm[0]
 
     # Tail incidence sizing loop (secant method)
     i_old = 0.0
-    m_old = trim_moment(i_old)
+    m_old = CM[1] + CL[1] * x_cg / MAC  # moment about the CG at i = 0, shifted from the NP run
     success = False
     print(f"Iter 0: Tail Alpha = {i_old:.2f} deg -> CMy = {m_old:.6f}")
 
@@ -164,6 +174,9 @@ def size_tail(wing, htail):
         "htail_span": round(b_tail, 5),
         "htail_chord": round(tail_chord, 5),
         "vtail_height": round(vtail_height, 5),
+        "htail_x_le": round(tail_x_le, 5),
+        "x_np": round(x_np, 5),
+        "x_cg": round(x_cg, 5),
         "tail_incidence": round(i_new, 4),
         "converged": success
     }
@@ -173,6 +186,13 @@ def wing_geometry(wing):
     S_w = 0.5 * (c_r + taper * c_r) * wing["span"]
     MAC = (2/3) * c_r * (1 + taper + taper**2) / (1 + taper)
     return S_w, MAC
+
+def wing_ac_x(wing):
+    # Quarter-MAC location behind the root LE (VSP sweep is measured at the LE)
+    taper = wing["taper"]
+    _, MAC = wing_geometry(wing)
+    y_mac = (wing["span"] / 2) * (1 + 2 * taper) / (3 * (1 + taper))
+    return y_mac * math.tan(math.radians(wing["sweep"])) + 0.25 * MAC
 
 def add_main_wing(wing):
     wid = vsp.AddGeom("WING", "")
@@ -195,16 +215,7 @@ def add_main_wing(wing):
     vsp.SetSetFlag(wid, 1, True)
     return wid
 
-def generate_wing(wing_name, wing):
-    vsp.ClearVSPModel()
-    add_main_wing(wing)
-
-    vsp.Update()
-    vsp3_path = f"{wing_name}.vsp3"
-    vsp.WriteVSPFile(vsp3_path)
-    return vsp3_path
-
-def generate_wing_and_tail(plane_name, wing, htail, htail_b, htail_alpha, vtail_height):
+def generate_wing_and_tail(plane_name, wing, htail, htail_b, htail_alpha, vtail_height, tail_x_le):
     vsp.ClearVSPModel()
     tail_chord = htail_b / htail["aspect_ratio"]
 
@@ -226,11 +237,12 @@ def generate_wing_and_tail(plane_name, wing, htail, htail_b, htail_alpha, vtail_
     vsp.SetParmVal(hid, "Root_Chord", "XSec_1", tail_chord)
     vsp.SetParmVal(hid, "Tip_Chord", "XSec_1", tail_chord)
     vsp.SetParmVal(hid, "Sweep", "XSec_1", 0.0)
-    vsp.SetParmVal(hid, "X_Rel_Location", "XForm", htail["l_H"])
+    vsp.SetParmVal(hid, "X_Rel_Location", "XForm", tail_x_le)
     vsp.SetParmVal(hid, "Y_Rel_Rotation", "XForm", htail_alpha)
-    vsp.SetParmVal(hid, "Camber", "XSecCurve_0", h_camber)
-    vsp.SetParmVal(hid, "CamberLoc", "XSecCurve_0", h_cam_loc)
-    vsp.SetParmVal(hid, "ThickChord", "XSecCurve_0", h_thick)
+    for i in [0, 1]:
+        vsp.SetParmVal(hid, "Camber", f"XSecCurve_{i}", h_camber)
+        vsp.SetParmVal(hid, "CamberLoc", f"XSecCurve_{i}", h_cam_loc)
+        vsp.SetParmVal(hid, "ThickChord", f"XSecCurve_{i}", h_thick)
     vsp.SetSetFlag(hid, 1, True)
 
     # Vertical Tail
@@ -241,11 +253,12 @@ def generate_wing_and_tail(plane_name, wing, htail, htail_b, htail_alpha, vtail_
     vsp.SetParmVal(vid, "Root_Chord", "XSec_1", tail_chord)
     vsp.SetParmVal(vid, "Tip_Chord", "XSec_1", tail_chord)
     vsp.SetParmVal(vid, "Sweep", "XSec_1", 0.0)
-    vsp.SetParmVal(vid, "X_Rel_Location", "XForm", htail["l_H"])
+    vsp.SetParmVal(vid, "X_Rel_Location", "XForm", tail_x_le)
     vsp.SetParmVal(vid, "X_Rel_Rotation", "XForm", 90.0)
-    vsp.SetParmVal(vid, "Camber", "XSecCurve_0", v_camber)
-    vsp.SetParmVal(vid, "CamberLoc", "XSecCurve_0", v_cam_loc)
-    vsp.SetParmVal(vid, "ThickChord", "XSecCurve_0", v_thick)
+    for i in [0, 1]:
+        vsp.SetParmVal(vid, "Camber", f"XSecCurve_{i}", v_camber)
+        vsp.SetParmVal(vid, "CamberLoc", f"XSecCurve_{i}", v_cam_loc)
+        vsp.SetParmVal(vid, "ThickChord", f"XSecCurve_{i}", v_thick)
     vsp.SetSetFlag(vid, 1, True)
 
     vsp.Update()
@@ -253,7 +266,7 @@ def generate_wing_and_tail(plane_name, wing, htail, htail_b, htail_alpha, vtail_
     vsp.WriteVSPFile(vsp3_path)
     return vsp3_path
 
-def get_moment(vsp3_path, x_cg, Sref, cref, bref):
+def run_vspaero(vsp3_path, x_ref, Sref, cref, bref, alphas):
     vsp.ClearVSPModel()
     vsp.ReadVSPFile(vsp3_path)
     mach = velocity / 343.0
@@ -269,10 +282,10 @@ def get_moment(vsp3_path, x_cg, Sref, cref, bref):
     vsp.SetDoubleAnalysisInput("VSPAEROSweep", "Sref", [Sref])
     vsp.SetDoubleAnalysisInput("VSPAEROSweep", "cref", [cref])
     vsp.SetDoubleAnalysisInput("VSPAEROSweep", "bref", [bref])
-    vsp.SetDoubleAnalysisInput("VSPAEROSweep", "Xcg", [x_cg])
-    vsp.SetDoubleAnalysisInput("VSPAEROSweep", "AlphaStart", [float(alpha)])
-    vsp.SetDoubleAnalysisInput("VSPAEROSweep", "AlphaEnd", [float(alpha)])
-    vsp.SetIntAnalysisInput("VSPAEROSweep", "AlphaNpts", [1])
+    vsp.SetDoubleAnalysisInput("VSPAEROSweep", "Xcg", [x_ref])
+    vsp.SetDoubleAnalysisInput("VSPAEROSweep", "AlphaStart", [float(alphas[0])])
+    vsp.SetDoubleAnalysisInput("VSPAEROSweep", "AlphaEnd", [float(alphas[-1])])
+    vsp.SetIntAnalysisInput("VSPAEROSweep", "AlphaNpts", [len(alphas)])
     vsp.SetDoubleAnalysisInput("VSPAEROSweep", "MachStart", [mach])
     vsp.SetDoubleAnalysisInput("VSPAEROSweep", "Vinf", [velocity])
     vsp.SetIntAnalysisInput("VSPAEROSweep", "WakeNumIter", [8])
@@ -282,7 +295,8 @@ def get_moment(vsp3_path, x_cg, Sref, cref, bref):
 
     # Extract Results
     res_id = vsp.FindLatestResultsID("VSPAERO_Polar")
-    cm = vsp.GetDoubleResults(res_id, "CMytot")[0]
+    cl = list(vsp.GetDoubleResults(res_id, "CLtot"))
+    cm = list(vsp.GetDoubleResults(res_id, "CMytot"))
 
     # Cleanup files
     base = os.path.splitext(vsp3_path)[0]
@@ -290,19 +304,7 @@ def get_moment(vsp3_path, x_cg, Sref, cref, bref):
         try: os.remove(f)
         except: pass
 
-    return cm
-
-def calc_cg(S_tail, wing, htail, SM=SM):
-    S_w, MAC = wing_geometry(wing)
-    l_H, AR_t = htail["l_H"], htail["aspect_ratio"]
-    AR_w = wing["span"]**2 / S_w
-
-    # Simple estimate for lift curves
-    a_w = (2 * math.pi * AR_w) / (2 + math.sqrt(4 + AR_w**2))
-    a_t = (2 * math.pi * AR_t) / (2 + math.sqrt(4 + AR_t**2))
-
-    NP = 0.25 + (S_tail * l_H) / (S_w * MAC) * (a_t / a_w) * (1 - 2 * a_w / (math.pi * AR_w))
-    return (NP - SM) * MAC
+    return cl, cm
 
 if __name__ == "__main__":
     main()
