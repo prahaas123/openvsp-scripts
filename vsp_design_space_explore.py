@@ -8,24 +8,26 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from scipy.stats import qmc
 
-# INPUTS
+# INPUTS ----------------------------------------------------------------------------
 
 N_SAMPLES = 256
 KEEP_PCTL = (2.0, 98.0)  # percentiles of feasible samples
-VELOCITY = 15.0          # [m/s] cruise airspeed
+VELOCITY = 20.0          # [m/s] cruise airspeed
 
-VAR_NAMES = ["root_chord", "taper", "sweep", "washout", "span", "alpha"]
-BOUNDS = [
-    (0.15, 0.40),    # root_chord [m]
-    (0.25, 1.00),    # taper ratio
-    (0.0, 45.0),     # LE sweep [deg]
-    (-5.0, 0.0),     # washout [deg]
-    (0.50, 0.60),    # full span [m]
-    (2.0, 8.0),      # alpha [deg]
-]
+# Each parameter is either:
+#   (lo, hi)  -> included in the study (sampled between lo and hi)
+#   number    -> held fixed at that value
+PARAMS = {
+    "root_chord": (0.10, 0.15),   # [m]
+    "taper":      (0.5, 1.00),    # taper ratio
+    "sweep":      (0.0, 5.0),     # LE sweep [deg]
+    "washout":    (-5.0, 0.0),    # [deg]
+    "span":       (0.70, 1.0),    # full span [m]
+    "alpha":      (2.0, 8.0),     # [deg]
+    "dihedral":   2.5,            # [deg]
+}
 
-DIHEDRAL = 2.5           # [deg] fixed dihedral value
-AIRFOIL_FILE = os.path.join("Airfoils", "mh61.dat")
+AIRFOIL_FILE = os.path.join("Airfoils", "naca2412.dat")
 
 # Weight Estimate
 M_FIXED = 0.265          # [kg]      avionics, battery, propulsion, payload
@@ -33,27 +35,34 @@ M_SPAR_PER_M = 0.044     # [kg/m]    spar mass per unit span
 M_SKIN_PER_M2 = 0.950    # [kg/m^2]  3D-printed skin + ribs per unit planform area
 
 # Constraint Targets
-STATIC_MARGIN = 0.05
-CM_TOL = 0.02
-AR_MIN = 2.0
-AR_MAX = 6.0
+STATIC_MARGIN = 0.15
+CM_TOL = 0.2
+AR_MIN = 5.0
+AR_MAX = 15.0
 TIP_CHORD_MIN = 0.05
 
-# OTHER INPUTS (NO CHANGES REQUIRED)
+# OTHER INPUTS (NO CHANGES REQUIRED) ------------------------------------------------
 
 RHO = 1.225
 Q_INF = 0.5 * RHO * VELOCITY ** 2
 
 ALPHA_STEP_DEG = 1.0
 
+ALL_NAMES = list(PARAMS)
+VAR_NAMES = [n for n, v in PARAMS.items() if isinstance(v, (tuple, list))]
+FIXED = {n: float(v) for n, v in PARAMS.items() if n not in VAR_NAMES}
+for n in VAR_NAMES:
+    if not PARAMS[n][0] < PARAMS[n][1]:
+        raise ValueError(f"bad bounds for {n}: {PARAMS[n]}")
+
 SAMPLE_CSV = "dse_samples.csv"
 CONSTRAINTS = ["lift", "trim", "ar_min", "ar_max", "tip_chord"]
 DERIVED = ["AR", "S_ref", "MAC", "tip_chord", "CL", "CD", "LD", "drag", "lift",
            "weight", "CM_cg", "CM_alpha_cg", "x_np", "x_cg", "feasible"]
-FIELDS = VAR_NAMES + DERIVED + [f"v_{c}" for c in CONSTRAINTS]
+FIELDS = ALL_NAMES + DERIVED + [f"v_{c}" for c in CONSTRAINTS]
 
-LO = np.array([b[0] for b in BOUNDS])
-HI = np.array([b[1] for b in BOUNDS])
+LO = np.array([PARAMS[n][0] for n in VAR_NAMES])
+HI = np.array([PARAMS[n][1] for n in VAR_NAMES])
 ND = len(VAR_NAMES)
 
 def total_weight(span, s_ref):
@@ -70,7 +79,11 @@ def planform(root_chord, taper, span):
 import vsp_optimization as vo  # noqa: E402
 
 def evaluate(x):
-    root_chord, taper, sweep, washout, span, alpha = [float(v) for v in x]
+    p = dict(FIXED)
+    p.update(zip(VAR_NAMES, (float(v) for v in x)))
+    root_chord, taper, sweep, washout, span, alpha, dihedral = (
+        p["root_chord"], p["taper"], p["sweep"], p["washout"],
+        p["span"], p["alpha"], p["dihedral"])
     run_id = f"dse_{uuid.uuid4().hex[:8]}"
     try:
         g = planform(root_chord, taper, span)
@@ -79,7 +92,7 @@ def evaluate(x):
         cd0 = vo.estimate_cd0(mac, s_ref, sweep)
 
         vsp3_path, _ = vo.generate_wing(run_id, span, root_chord, taper,
-                                        sweep, DIHEDRAL, washout)
+                                        sweep, dihedral, washout)
         r = vo._run_vspaero(vsp3_path, s_ref, span, mac, x_cg=0.0, cd0=cd0,
                             alpha_start=alpha - ALPHA_STEP_DEG,
                             alpha_end=alpha + ALPHA_STEP_DEG, alpha_npts=3)
@@ -113,7 +126,7 @@ def evaluate(x):
         if not all(np.isfinite(list(v.values()))):
             raise RuntimeError("non-finite constraint margin")
 
-        row = dict(zip(VAR_NAMES, [float(t) for t in x]))
+        row = dict(p)
         row.update(AR=ar, S_ref=s_ref, MAC=mac, tip_chord=g["tip_chord"],
                    CL=cl_0, CD=cd_0, LD=ld, drag=drag, lift=lift, weight=weight,
                    CM_cg=cm_cg, CM_alpha_cg=cm_alpha_cg, x_np=x_np, x_cg=x_cg,
@@ -162,7 +175,8 @@ def sample():
         return
     pts = qmc.Sobol(d=ND, scramble=True, seed=1).random(N_SAMPLES)
     pts = LO + pts * (HI - LO)
-    print(f"[sample] resuming at {done}/{N_SAMPLES}")
+    print(f"[sample] varying {VAR_NAMES}, fixed {FIXED}")
+    print(f"[sample] writing to {SAMPLE_CSV}, resuming at {done}/{N_SAMPLES}")
     with vo.make_pool() as pool:
         for i, row in zip(range(done, N_SAMPLES), pool.imap(evaluate, pts[done:])):
             if row is None:
@@ -190,8 +204,12 @@ def in_box(d, box):
     return m
 
 def plot_pairs(d, box):
+    if ND < 2:
+        print("[plot] need at least 2 varied parameters for pair plots; skipping.")
+        return
     m = d["feasible"] > 0.5
-    fig, ax = plt.subplots(ND - 1, ND - 1, figsize=(2.2 * (ND - 1), 2.2 * (ND - 1)))
+    fig, ax = plt.subplots(ND - 1, ND - 1, figsize=(max(2.2 * (ND - 1), 4), max(2.2 * (ND - 1), 4)),
+                           squeeze=False)
     norm = plt.Normalize(*np.percentile(d["drag"][m], [5, 95])) if m.sum() else None
     for r in range(1, ND):
         for c in range(ND - 1):
@@ -234,6 +252,8 @@ def summarize(d, box):
     print("\n--- TIGHTENED BOUNDS ---")
     for i, n in enumerate(VAR_NAMES):
         print(f"{n:12s}: [{LO[i]:7.3f}, {HI[i]:7.3f}] -> [{box[n][0]:7.3f}, {box[n][1]:7.3f}]")
+    for n, v in FIXED.items():
+        print(f"{n:12s}: fixed at {v:g}")
     print()
 
 def main():
