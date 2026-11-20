@@ -11,3 +11,4 @@ uav*
 *stl
 dse_*
 conv_*
+*__pycache__*
