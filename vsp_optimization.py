@@ -19,17 +19,48 @@ import numpy as np
 import openvsp as vsp  # type: ignore
 from scipy.optimize import differential_evolution, NonlinearConstraint
 
-# INPUTS
+# INPUTS ----------------------------------------------------------------------------
 
 POPSIZE = 10                     # DE population = POPSIZE * number of design variables
 MAXITER = 30                     # DE generations
 N_WORKERS = os.cpu_count() or 1  # parallel VSPAERO cases
 
+# Each parameter is either:
+#   (lo, hi)  -> optimized between lo and hi (paste the tightened DSE bounds here)
+#   number    -> held fixed at that value
+PARAMS = {
+    "root_chord": (0.10, 0.15),   # [m]
+    "taper":      (0.5, 1.00),    # taper ratio
+    "sweep":      (0.0, 5.0),     # LE sweep [deg]
+    "washout":    0.0,            # [deg]
+    "span":       (0.70, 1.0),    # full span [m]
+    "alpha":      (2.0, 8.0),     # [deg]
+    "dihedral":   2.5,            # [deg]
+}
+
+# OTHER INPUTS (NO CHANGES REQUIRED) ------------------------------------------------
+
 from vsp_design_space_explore import (
-    VELOCITY, RHO, VAR_NAMES, BOUNDS, Q_INF, ALPHA_STEP_DEG, STATIC_MARGIN,
-    CM_TOL, AR_MIN, AR_MAX, TIP_CHORD_MIN, DIHEDRAL, AIRFOIL_FILE,
+    VELOCITY, RHO, Q_INF, ALPHA_STEP_DEG, STATIC_MARGIN,
+    CM_TOL, AR_MIN, AR_MAX, TIP_CHORD_MIN, AIRFOIL_FILE,
     planform, total_weight,
 )
+
+ALL_NAMES = ["root_chord", "taper", "sweep", "washout", "span", "alpha", "dihedral"]
+if set(PARAMS) != set(ALL_NAMES):
+    raise ValueError(f"PARAMS must define exactly {ALL_NAMES}")
+VAR_NAMES = [n for n in ALL_NAMES if isinstance(PARAMS[n], (tuple, list))]
+FIXED = {n: float(PARAMS[n]) for n in ALL_NAMES if n not in VAR_NAMES}
+for n in VAR_NAMES:
+    if not PARAMS[n][0] < PARAMS[n][1]:
+        raise ValueError(f"bad bounds for {n}: {PARAMS[n]}")
+BOUNDS = [tuple(PARAMS[n]) for n in VAR_NAMES]
+
+def unpack(x):
+    """Merge the DE vector (varied params only) with the fixed params."""
+    p = dict(FIXED)
+    p.update(zip(VAR_NAMES, (float(v) for v in x)))
+    return p
 
 MU = 1.81e-5
 A_SOUND = 343.0          # [m/s]
@@ -57,7 +88,7 @@ NCPU = 1                 # threads per VSPAERO case (meshes are too small to ben
 LOG_CSV = f"optimization_results_{time.strftime('%Y%m%d_%H%M%S')}.csv"
 LOG_FIELDS = [
     "run_id", "objective",
-    "root_chord", "taper", "sweep", "washout", "span", "alpha",
+    *ALL_NAMES,
     "AR", "S_ref", "MAC", "tip_chord", "mass_kg", "weight", "lift", "lift_margin",
     "CL", "CD", "LD", "drag_N",
     "CM_cg", "CM_alpha_cg", "x_np", "x_cg", "x_np_est",
@@ -386,8 +417,8 @@ def _pick(values, coord, target):
 
 # Objective Evaluation
 def evaluate_geometry(x):
-    root_chord, taper, sweep, washout, span, alpha = x
-    g = planform(root_chord, taper, span)
+    p = unpack(x)
+    g = planform(p["root_chord"], p["taper"], p["span"])
     return np.array([g["ar"], g["tip_chord"]])
 
 def _quad_pen(violation, scale):
@@ -396,7 +427,10 @@ def _quad_pen(violation, scale):
     return PENALTY_WEIGHT * (violation / max(abs(scale), 1e-9)) ** 2
 
 def evaluate_aero_objective(x):
-    root_chord, taper, sweep, washout, span, alpha = [float(v) for v in x]
+    p = unpack(x)
+    root_chord, taper, sweep, washout, span, alpha, dihedral = (
+        p["root_chord"], p["taper"], p["sweep"], p["washout"],
+        p["span"], p["alpha"], p["dihedral"])
     run_id = f"wing_{uuid.uuid4().hex[:8]}"
  
     try:
@@ -406,7 +440,7 @@ def evaluate_aero_objective(x):
         cd0 = estimate_cd0(mac, s_ref, sweep)
  
         vsp3_path, _ = generate_wing(run_id, span, root_chord, taper,
-                                     sweep, DIHEDRAL, washout)
+                                     sweep, dihedral, washout)
 
         # Alpha sweep, moment reference at the root LE (x=0)
         r1 = _run_vspaero(
@@ -460,11 +494,9 @@ def evaluate_aero_objective(x):
         if feasible:
             append_log({
                 "run_id": run_id,
-                "objective": round(objective, 6), "root_chord": round(root_chord, 6),
-                "taper": round(taper, 6),
-                "sweep": round(sweep, 6), "washout": round(washout, 6),
-                "span": round(span, 6),
-                "alpha": round(alpha, 6), "AR": round(ar, 6),
+                "objective": round(objective, 6),
+                **{n: round(v, 6) for n, v in p.items()},
+                "AR": round(ar, 6),
                 "S_ref": round(s_ref, 6), "MAC": round(mac, 6),
                 "tip_chord": round(g["tip_chord"], 6),
                 "weight": round(weight, 6), "mass_kg": round(weight/9.81, 6),
@@ -518,6 +550,9 @@ def main():
     print(f"[setup] airfoil t/c = {TC_MAX:.4f} at x/c = {X_TC_MAX:.3f}")
     print(f"[setup] q_inf = {Q_INF:.2f} Pa at V = {VELOCITY:.1f} m/s")
     print(f"[setup] profile drag: {PROFILE_DRAG_MODEL}, {N_WORKERS} parallel VSPAERO cases")
+    print(f"[setup] varying {VAR_NAMES}, fixed {FIXED}")
+    if not VAR_NAMES:
+        raise ValueError("every parameter in PARAMS is fixed; give at least one a (lo, hi) range")
     print("Starting SciPy DE optimization...\n")
  
     geom_constraint = NonlinearConstraint(
@@ -560,13 +595,12 @@ def main():
             print(f"DE returned x = {result.x}, f = {result.fun}")
         return
  
-    p = {k: float(row[k]) for k in
-         ["root_chord", "taper", "sweep", "washout", "span", "alpha"]}
+    p = {k: float(row[k]) for k in ALL_NAMES}
  
     print("\n--- OPTIMAL WING ---")
     print("\n--- PARAMETERS ---")
     for k, v in p.items():
-        print(f"{k:12s}: {v:.4f}")
+        print(f"{k:12s}: {v:.4f}" + ("  (fixed)" if k in FIXED else ""))
  
     print("\n--- GEOMETRY ---")
     for k in ["S_ref", "AR", "MAC", "tip_chord"]:
@@ -589,7 +623,7 @@ def main():
  
     _, stl_path = generate_wing(
         "Optimized_Wing", p["span"], p["root_chord"], p["taper"],
-        p["sweep"], DIHEDRAL, p["washout"], export_stl=True,
+        p["sweep"], p["dihedral"], p["washout"], export_stl=True,
     )
     if stl_path:
         visualize_stl(stl_path)

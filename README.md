@@ -38,17 +38,20 @@ Run this before `vsp_optimization.py`. It Sobol-samples the design space, runs V
 
 - **Edit:**
   - `N_SAMPLES`, `KEEP_PCTL`
-  - `VELOCITY` (cruise speed), `AIRFOIL_FILE`, `DIHEDRAL` (fixed)
-  - `BOUNDS` for the 6 design variables: root chord, taper, LE sweep, washout, span, alpha
+  - `VELOCITY` (cruise speed), `AIRFOIL_FILE`
+  - `PARAMS`: root chord, taper, LE sweep, washout, span, alpha and dihedral. Each one is either a `(lo, hi)` range to sample or a single number to hold fixed.
   - the weight model (`M_FIXED`, `M_SPAR_PER_M`, `M_SKIN_PER_M2`)
   - constraint targets (`STATIC_MARGIN`, `CM_TOL`, `AR_MIN`/`AR_MAX`, `TIP_CHORD_MIN`)
-- **Output:** `dse_samples.csv` and a pair plot of the feasible region. Copy the tightened bounds into `BOUNDS` before optimizing.
+- **Output:** `dse_samples.csv` and a pair plot of the feasible region. Copy the tightened bounds into `PARAMS` in `vsp_optimization.py` before optimizing.
 
 ### `vsp_optimization.py`
 
 Minimizes cruise drag with differential evolution, subject to lift ≥ weight, trim at the target static margin, and the AR and tip chord limits.
 
-- **Edit:** `POPSIZE`, `MAXITER`, `N_WORKERS`, and `PROFILE_DRAG_MODEL` (`"strip"` or `"flat_plate"`). Bounds and constraints are edited in `vsp_design_space_explore.py`.
+- **Edit:**
+  - `POPSIZE`, `MAXITER`, `N_WORKERS`, and `PROFILE_DRAG_MODEL` (`"strip"` or `"flat_plate"`)
+  - `PARAMS`: set each parameter (root chord, taper, LE sweep, washout, span, alpha, dihedral) to a `(lo, hi)` range to optimize it, or to a single number to hold it fixed. Paste the tightened bounds from the design space exploration here.
+  - Velocity, airfoil, weight model and constraints are still edited in `vsp_design_space_explore.py`.
 - **Output:** every feasible design goes to `optimization_results_<date>_<time>.csv`. The best wing is printed and exported as an STL.
 - **Stop:** `Ctrl+C` stops the run cleanly and still reports the best feasible design logged so far.
 
